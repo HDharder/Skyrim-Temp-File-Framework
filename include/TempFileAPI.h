@@ -15,6 +15,19 @@
 //   keeps them open with FILE_FLAG_DELETE_ON_CLOSE), and leftover folders are swept on the
 //   next launch.
 //
+// THE GAME ENGINE SEES TEMP FILES AT ANY TIME
+//   The engine resolves every resource (meshes, textures...) through an index it builds while
+//   loading the archives, and its model loader never looks at the disk for a path the index does
+//   not know. For each temp file the framework updates that index the way the game itself does at
+//   startup - a BSA record becomes a loose record (restored when the temp file is deleted), a
+//   brand-new path gets a new record - so the engine loads the temp file even when it is created
+//   long after the game started, over a file that lives inside a BSA.
+//   This needs runtime 1.6.x (the engine code is verified at startup). On any other runtime a temp
+//   file over a BSA-only path returns kTempFile_ArchiveLocked instead: it exists for std/Win32
+//   access, but the engine keeps the BSA copy. Success checks should be `result >= 0`.
+//   Resources the engine has ALREADY loaded stay in its caches: create/replace a temp file before
+//   the model or texture is first loaded.
+//
 // PATHS
 //   Relative to Data, UTF-8, '/' or '\' both accepted, a leading "Data/" is optional and
 //   case does not matter: "SKSE/Plugins/MyMod/config.json" == "data\skse\plugins\mymod\CONFIG.JSON".
@@ -38,6 +51,9 @@ constexpr std::uint32_t kTempFileAPIVersion = 1;
 enum TempFileResult : std::int32_t {
     kTempFile_Ok = 0,             // done
     kTempFile_AlreadyExists = 1,  // Copy: a temp file already existed and was reused as is (success)
+    kTempFile_ArchiveLocked = 2,  // created (success), BUT on a runtime without engine index support the
+                                  // path only exists in a loaded BSA: the ENGINE keeps the BSA copy.
+                                  // std/Win32 file access (other plugins) does see the temp file.
     kTempFile_InvalidPath = -1,   // empty, absolute, contains "..", or invalid characters
     kTempFile_NotFound = -2,      // Copy: the original exists nowhere (loose or BSA). Delete: no temp file
     kTempFile_IOError = -3,       // could not create/write the temp file (see TempFileFramework.log)

@@ -1,5 +1,6 @@
 #include "Store.h"
 
+#include "ArchiveBypass.h"
 #include "Real.h"
 
 namespace Store {
@@ -212,6 +213,22 @@ namespace Store {
             return size == 0 || stream.read(reinterpret_cast<char*>(a_out.data()), size);
         }
 
+        // The game decides "loose or BSA" for every archived file ONCE, while loading the archives
+        // (a GetFileAttributesExA per entry - seen in the in-game trace), and never asks again. A
+        // path with no loose file that the engine finds anyway is being served from a BSA, and a
+        // temp file created now will not change that for the engine. Must run BEFORE the entry is
+        // registered, or our own redirection would answer "loose file exists".
+        bool IsArchiveOnly(const std::wstring& a_display) {
+            if (!g_archivesReady) {
+                return false;
+            }
+            if (Real::GetFileAttributesW((g_dataDir + a_display).c_str()) != INVALID_FILE_ATTRIBUTES) {
+                return false;  // loose (in Data or a mod folder): checked on every request, works
+            }
+            RE::BSResourceNiBinaryStream stream(ToAnsi(a_display));
+            return stream.good() && stream.stream;
+        }
+
         Result CreateLocked(const std::wstring& a_key, const std::wstring& a_display, const void* a_data,
                             std::size_t a_size) {
             std::optional<std::wstring> existing;
@@ -232,6 +249,7 @@ namespace Store {
                 return kTempFile_Ok;
             }
 
+            const bool archiveLocked = IsArchiveOnly(a_display);
             const std::wstring real = g_filesRoot + a_display;
             const HANDLE anchor = OpenAnchor(real);
             if (anchor == INVALID_HANDLE_VALUE) {
@@ -251,7 +269,15 @@ namespace Store {
                 g_entries.emplace(a_key, Entry{real, a_display, anchor});
                 g_count = g_entries.size();
             }
-            logger::info("Created temp file '{}' ({} bytes)", ToUtf8(a_display), a_size);
+            ArchiveBypass::OnCreated(a_display);
+            logger::info("Created temp file '{}' ({} bytes){}", ToUtf8(a_display), a_size,
+                         archiveLocked && ArchiveBypass::Active() ? ", overriding its BSA copy" : "");
+            if (archiveLocked && !ArchiveBypass::Active()) {
+                logger::warn("'{}' only exists inside a BSA the game has already loaded: the engine keeps using "
+                             "the BSA copy. Create it before the archives load (kPostLoad) to override it.",
+                             ToUtf8(a_display));
+                return kTempFile_ArchiveLocked;
+            }
             return kTempFile_Ok;
         }
 
@@ -505,11 +531,13 @@ namespace Store {
     }
 
     void Shutdown() {
-        if (!g_initialized) {
+        static std::atomic<bool> done{false};
+        if (!g_initialized || done.exchange(true)) {
             return;
         }
-        // Runs in DLL_PROCESS_DETACH. If another thread died holding the lock, do not insist:
-        // the kernel closes the anchors anyway and the empty folder goes on the next launch.
+        // Runs right before the process terminates itself, or in DLL_PROCESS_DETACH. If another
+        // thread is holding the lock, do not insist: the kernel closes the anchors anyway and the
+        // empty folder goes on the next launch.
         std::unique_lock lock(g_mapLock, std::try_to_lock);
         if (!lock) {
             return;
@@ -663,6 +691,7 @@ namespace Store {
             g_entries.erase(it);
             g_count = g_entries.size();
         }
+        ArchiveBypass::OnDeleted(entry.display);
         Retire(entry);
         logger::info("Deleted temp file '{}'", ToUtf8(entry.display));
         return kTempFile_Ok;

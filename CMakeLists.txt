@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.21)
+﻿cmake_minimum_required(VERSION 3.21)
 
 # The project name becomes the DLL name: TempFileFramework.dll.
 # WARNING: include/TempFileAPI.h looks the DLL up by this name - changing it breaks consumers.
@@ -22,17 +22,48 @@ add_commonlibsse_plugin(${PROJECT_NAME} SOURCES
     src/Hooks.cpp
     src/Exports.cpp
     src/Papyrus.cpp
+    src/CallStack.cpp
+    src/ArchiveBypass.cpp
 )
 target_compile_features(${PROJECT_NAME} PRIVATE cxx_std_23)
 target_precompile_headers(${PROJECT_NAME} PRIVATE PCH.h)
 target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}" include src)
-target_link_libraries(${PROJECT_NAME} PRIVATE minhook::minhook)
+target_link_libraries(${PROJECT_NAME} PRIVATE minhook::minhook shell32 ole32)
 
 # Real Release PDB: without /Zi an MSVC Release build produces no PDB, leaving CrashLogger with
 # no symbols matching the DLL.
 target_compile_options(${PROJECT_NAME} PRIVATE $<$<CONFIG:Release>:/Zi>)
 target_link_options(${PROJECT_NAME} PRIVATE
     $<$<CONFIG:Release>:/DEBUG /OPT:REF /OPT:ICF /PDBALTPATH:$<TARGET_PDB_FILE_NAME:${PROJECT_NAME}>>)
+
+# In-game test plugin (tests/ingame). Not part of the release: its own mod folder, turn it off
+# with -DTFF_BUILD_TESTER=OFF.
+option(TFF_BUILD_TESTER "Build the TempFileTester in-game test plugin" ON)
+if(TFF_BUILD_TESTER)
+    add_commonlibsse_plugin(TempFileTester SOURCES tests/ingame/TesterPlugin.cpp)
+    target_compile_features(TempFileTester PRIVATE cxx_std_23)
+    target_precompile_headers(TempFileTester PRIVATE tests/ingame/PCH.h)
+    target_include_directories(TempFileTester PRIVATE include src)
+    target_link_libraries(TempFileTester PRIVATE shell32 ole32)
+
+    if(DEFINED ENV{SKYRIM_FOLDER} AND IS_DIRECTORY "$ENV{SKYRIM_FOLDER}/Data")
+        set(TESTER_FOLDER "$ENV{SKYRIM_FOLDER}/Data")
+    endif()
+    if(DEFINED ENV{SKYRIM_MODS_FOLDER} AND IS_DIRECTORY "$ENV{SKYRIM_MODS_FOLDER}")
+        set(TESTER_FOLDER "$ENV{SKYRIM_MODS_FOLDER}/TempFileTester")
+    endif()
+    if(DEFINED TESTER_FOLDER)
+        message(STATUS "Tester output folder: ${TESTER_FOLDER}")
+        add_custom_command(
+            TARGET TempFileTester
+            POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E make_directory "${TESTER_FOLDER}/SKSE/Plugins"
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:TempFileTester>" "${TESTER_FOLDER}/SKSE/Plugins/$<TARGET_FILE_NAME:TempFileTester>"
+            COMMAND "${CMAKE_COMMAND}" -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/tests/ingame/data" "${TESTER_FOLDER}"
+            VERBATIM
+        )
+    endif()
+endif()
 
 if(DEFINED OUTPUT_FOLDER)
     set(DLL_FOLDER "${OUTPUT_FOLDER}/SKSE/Plugins")

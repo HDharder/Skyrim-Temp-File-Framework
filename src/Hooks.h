@@ -5,4 +5,8 @@ namespace Hooks {
     // every other plugin. With MO2 our hook sits IN FRONT of usvfs: we redirect the Data path to
     // the temp file and usvfs lets it through (it is not a Data path).
     bool Install();
+
+    // Diagnostics: logs every hooked call whose path contains `a_filter` (case-insensitive).
+    // Empty filter = off.
+    void SetTrace(std::wstring_view a_filter);
 }

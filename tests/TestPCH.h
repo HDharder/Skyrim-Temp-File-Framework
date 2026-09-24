@@ -5,6 +5,7 @@
 #include <Windows.h>
 
 #include <MinHook.h>
+#include <winternl.h>
 
 #include <algorithm>
 #include <atomic>

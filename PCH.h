@@ -4,6 +4,7 @@
 #include "SKSE/SKSE.h"
 
 #include <MinHook.h>
+#include <winternl.h>
 
 #include <atomic>
 #include <shared_mutex>

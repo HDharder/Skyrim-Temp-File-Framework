@@ -1,5 +1,6 @@
 #include "Exports.h"
 
+#include "Hooks.h"
 #include "Store.h"
 
 // The C bridge of the public API (include/TempFileAPI.h). No C++ crosses the DLL boundary:
@@ -55,4 +56,10 @@ extern "C" __declspec(dllexport) const TempFileAPI* TempFile_GetAPI(std::uint32_
         return nullptr;
     }
     return &g_api;
+}
+
+// Diagnostics only - not part of TempFileAPI. Logs every hooked file call whose path contains
+// `a_filter` to TempFileFramework.log; null or "" turns it off.
+extern "C" __declspec(dllexport) void TempFile_DebugTrace(const char* a_filter) {
+    Hooks::SetTrace(a_filter ? Store::FromUtf8(a_filter) : std::wstring{});
 }

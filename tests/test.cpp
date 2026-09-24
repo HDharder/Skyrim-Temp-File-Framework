@@ -11,6 +11,17 @@
 
 namespace fs = std::filesystem;
 
+// The out-of-game test has no SkyrimSE.exe / Address Library: the engine-side pieces are no-ops.
+namespace Diagnostics {
+    void LogCallerStack() {}
+    void ResetCallerStackBudget() {}
+}
+namespace ArchiveBypass {
+    bool Active() noexcept { return false; }
+    void OnCreated(std::wstring_view) {}
+    void OnDeleted(std::wstring_view) {}
+}
+
 namespace {
     int g_failures = 0;
 
@@ -93,7 +104,24 @@ namespace {
             return 11;
         }
         WriteStd(ExeDir() / "child_out.txt", Store::ToUtf8(*real));
-        TerminateProcess(GetCurrentProcess(), 3);
+        // Straight to the original: a real CTD never goes through our TerminateProcess hook.
+        Real::TerminateProcess(GetCurrentProcess(), 3);
+        return 12;
+    }
+
+    // Child process: creates a temp file and quits the way Skyrim does - TerminateProcess on itself,
+    // through the HOOKED function this time.
+    int ChildExit() {
+        if (!Store::Init() || !Hooks::Install()) {
+            return 10;
+        }
+        Store::Create(L"SKSE/Plugins/TFFTest/exit.txt", "EXIT", 4);
+        const auto real = Store::GetRealPath(L"SKSE/Plugins/TFFTest/exit.txt");
+        if (!real) {
+            return 11;
+        }
+        WriteStd(ExeDir() / "child_out.txt", Store::ToUtf8(real->substr(0, real->find(L"\\files\\"))));
+        TerminateProcess(GetCurrentProcess(), 7);
         return 12;
     }
 }
@@ -102,8 +130,13 @@ int main(int argc, char** argv) {
     if (argc > 1 && argv[1] == "child"sv) {
         return ChildCrash();
     }
+    if (argc > 1 && argv[1] == "exit"sv) {
+        return ChildExit();
+    }
     if (argc > 1 && argv[1] == "sweep"sv) {
-        return Store::Init() ? 0 : 1;
+        const bool ok = Store::Init();
+        Store::Shutdown();
+        return ok ? 0 : 1;
     }
 
     const fs::path data = ExeDir() / "Data";
@@ -259,6 +292,17 @@ int main(int argc, char** argv) {
     CHECK(RunSelf(L"sweep") == 0);              // ...and the next launch deletes it
     CHECK(!fs::exists(childSession));
     CHECK(fs::exists(session));                 // while the LIVE session (this process) stays
+
+    std::printf("\n== exit: the game quits with TerminateProcess(self) ==\n");
+    CHECK(Store::Create(L"SKSE/Plugins/TFFTest/exit.txt", "EXIT", 4) == kTempFile_Ok);
+    fs::remove(ExeDir() / "child_out.txt");
+    CHECK(RunSelf(L"exit") == 7);
+    const std::string exitSession = ReadStd(ExeDir() / "child_out.txt");
+    std::printf("      child session: %s\n", exitSession.c_str());
+    CHECK(exitSession.find("SkyrimTempFiles") != std::string::npos);
+    CHECK(!fs::exists(Store::FromUtf8(exitSession)));  // the TerminateProcess hook removed the whole folder
+    Store::Shutdown();
+    CHECK(!fs::exists(session));
 
     std::printf("\n%s - %d failure(s)\n", g_failures == 0 ? "ALL PASSED" : "FAILED", g_failures);
     return g_failures == 0 ? 0 : 1;

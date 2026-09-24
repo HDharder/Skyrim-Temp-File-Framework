@@ -1,12 +1,14 @@
+#include "ArchiveBypass.h"
 #include "Exports.h"
 #include "Hooks.h"
+#include "LogDir.h"
 #include "Papyrus.h"
 #include "Store.h"
 
 namespace {
     // Opened BEFORE the hooks: the log file never goes through our redirection.
     void SetupLog() {
-        auto directory = logger::log_directory();
+        auto directory = SkseLogDirectory();
         if (!directory) {
             return;
         }
@@ -43,12 +45,14 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse) {
         logger::critical("Temp File Framework is DISABLED for this session");
         return true;  // do not take the game down because of this
     }
+    ArchiveBypass::Install();  // optional: without it, BSA-only paths report kTempFile_ArchiveLocked
     Exports::Enable();
     Papyrus::Register();
 
     SKSE::GetMessagingInterface()->RegisterListener([](SKSE::MessagingInterface::Message* a_message) {
         if (a_message->type == SKSE::MessagingInterface::kDataLoaded) {
             Store::SetArchivesReady();
+            ArchiveBypass::OnArchivesReady();
         }
     });
 

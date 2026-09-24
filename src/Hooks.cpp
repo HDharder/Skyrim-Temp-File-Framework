@@ -1,5 +1,6 @@
 #include "Hooks.h"
 
+#include "CallStack.h"
 #include "Real.h"
 #include "Store.h"
 
@@ -65,6 +66,115 @@ namespace Hooks {
                        static_cast<int>(std::size(a_ansi.cAlternateFileName)));
         }
 
+        // ---------------------------------------------------------------------------------
+        // Diagnostic trace (TempFile_DebugTrace): logs every hooked call whose path contains a
+        // filter, WHATEVER the outcome - used to find out which API a caller (the engine) really
+        // uses. Off by default; costs one atomic load per call when off.
+        // ---------------------------------------------------------------------------------
+        std::atomic<bool> g_traceOn{false};
+        std::mutex g_traceLock;
+        std::vector<std::wstring> g_traceFilters;  // '|'-separated alternatives, lowercase
+
+        void Trace(const char* a_function, LPCWSTR a_path) {
+            if (!g_traceOn.load(std::memory_order_relaxed) || t_busy || !a_path) {
+                return;
+            }
+            Busy busy;
+            const std::wstring lower = Store::Lower(a_path);
+            {
+                std::scoped_lock lock(g_traceLock);
+                if (std::ranges::none_of(g_traceFilters,
+                                         [&](const std::wstring& a_filter) { return lower.contains(a_filter); })) {
+                    return;
+                }
+            }
+            logger::info("[trace] {}(\"{}\") thread {}", a_function, Store::ToUtf8(a_path), GetCurrentThreadId());
+            // The framework's own calls (Create writing the temp file) are noise here.
+            if (lower.find(L"skyrimtempfiles") == std::wstring::npos) {
+                Diagnostics::LogCallerStack();
+            }
+        }
+
+        void TraceA(const char* a_function, LPCSTR a_path) {
+            if (g_traceOn.load(std::memory_order_relaxed) && !t_busy && a_path) {
+                Trace(a_function, AnsiToWide(a_path).c_str());
+            }
+        }
+
+        // Native (ntdll) layer - TRACE ONLY, no redirection. Installed lazily the first time the
+        // trace is turned on, so a normal session never touches ntdll. Shows callers that skip
+        // Win32 entirely (the layer usvfs hooks).
+        using NtCreateFileFn = NTSTATUS(NTAPI*)(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES, PIO_STATUS_BLOCK,
+                                                PLARGE_INTEGER, ULONG, ULONG, ULONG, ULONG, PVOID, ULONG);
+        using NtOpenFileFn = NTSTATUS(NTAPI*)(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES, PIO_STATUS_BLOCK, ULONG,
+                                              ULONG);
+        using NtQueryAttributesFileFn = NTSTATUS(NTAPI*)(POBJECT_ATTRIBUTES, PVOID);
+
+        NtCreateFileFn g_realNtCreateFile = nullptr;
+        NtOpenFileFn g_realNtOpenFile = nullptr;
+        NtQueryAttributesFileFn g_realNtQueryAttributesFile = nullptr;
+        NtQueryAttributesFileFn g_realNtQueryFullAttributesFile = nullptr;
+
+        void TraceNt(const char* a_function, POBJECT_ATTRIBUTES a_attributes) {
+            if (!g_traceOn.load(std::memory_order_relaxed) || t_busy || !a_attributes ||
+                !a_attributes->ObjectName || !a_attributes->ObjectName->Buffer) {
+                return;
+            }
+            std::wstring name(a_attributes->ObjectName->Buffer, a_attributes->ObjectName->Length / sizeof(wchar_t));
+            if (a_attributes->RootDirectory) {
+                name = L"<relative to handle> " + name;
+            }
+            Trace(a_function, name.c_str());
+        }
+
+        NTSTATUS NTAPI Hook_NtCreateFile(PHANDLE a_handle, ACCESS_MASK a_access, POBJECT_ATTRIBUTES a_attributes,
+                                         PIO_STATUS_BLOCK a_status, PLARGE_INTEGER a_allocation, ULONG a_fileAttributes,
+                                         ULONG a_share, ULONG a_disposition, ULONG a_options, PVOID a_ea,
+                                         ULONG a_eaLength) {
+            TraceNt("NtCreateFile", a_attributes);
+            return g_realNtCreateFile(a_handle, a_access, a_attributes, a_status, a_allocation, a_fileAttributes,
+                                      a_share, a_disposition, a_options, a_ea, a_eaLength);
+        }
+
+        NTSTATUS NTAPI Hook_NtOpenFile(PHANDLE a_handle, ACCESS_MASK a_access, POBJECT_ATTRIBUTES a_attributes,
+                                       PIO_STATUS_BLOCK a_status, ULONG a_share, ULONG a_options) {
+            TraceNt("NtOpenFile", a_attributes);
+            return g_realNtOpenFile(a_handle, a_access, a_attributes, a_status, a_share, a_options);
+        }
+
+        NTSTATUS NTAPI Hook_NtQueryAttributesFile(POBJECT_ATTRIBUTES a_attributes, PVOID a_info) {
+            TraceNt("NtQueryAttributesFile", a_attributes);
+            return g_realNtQueryAttributesFile(a_attributes, a_info);
+        }
+
+        NTSTATUS NTAPI Hook_NtQueryFullAttributesFile(POBJECT_ATTRIBUTES a_attributes, PVOID a_info) {
+            TraceNt("NtQueryFullAttributesFile", a_attributes);
+            return g_realNtQueryFullAttributesFile(a_attributes, a_info);
+        }
+
+        void InstallNtTrace() {
+            static std::once_flag once;
+            std::call_once(once, [] {
+                const auto hook = [](const char* a_name, LPVOID a_detour, LPVOID* a_original) {
+                    LPVOID target = nullptr;
+                    const MH_STATUS status = MH_CreateHookApiEx(L"ntdll.dll", a_name, a_detour, a_original, &target);
+                    if (status == MH_OK) {
+                        MH_EnableHook(target);
+                    } else {
+                        logger::warn("[trace] could not hook {}: {}", a_name, MH_StatusToString(status));
+                    }
+                };
+                hook("NtCreateFile", reinterpret_cast<LPVOID>(&Hook_NtCreateFile),
+                     reinterpret_cast<LPVOID*>(&g_realNtCreateFile));
+                hook("NtOpenFile", reinterpret_cast<LPVOID>(&Hook_NtOpenFile),
+                     reinterpret_cast<LPVOID*>(&g_realNtOpenFile));
+                hook("NtQueryAttributesFile", reinterpret_cast<LPVOID>(&Hook_NtQueryAttributesFile),
+                     reinterpret_cast<LPVOID*>(&g_realNtQueryAttributesFile));
+                hook("NtQueryFullAttributesFile", reinterpret_cast<LPVOID>(&Hook_NtQueryFullAttributesFile),
+                     reinterpret_cast<LPVOID*>(&g_realNtQueryFullAttributesFile));
+            });
+        }
+
         // FindFirstFile wildcard ('*' and '?'), case-insensitive (both inputs are already
         // lowercase). "*.*" matches everything, including names without a dot, like Windows.
         bool WildcardMatch(std::wstring_view a_pattern, std::wstring_view a_name) {
@@ -128,6 +238,7 @@ namespace Hooks {
         HANDLE WINAPI Hook_CreateFileW(LPCWSTR a_name, DWORD a_access, DWORD a_share,
                                        LPSECURITY_ATTRIBUTES a_security, DWORD a_disposition, DWORD a_flags,
                                        HANDLE a_template) {
+            Trace("CreateFileW", a_name);
             if (!Bypass()) {
                 Busy busy;
                 bool handled = false;
@@ -142,6 +253,7 @@ namespace Hooks {
 
         HANDLE WINAPI Hook_CreateFileA(LPCSTR a_name, DWORD a_access, DWORD a_share, LPSECURITY_ATTRIBUTES a_security,
                                        DWORD a_disposition, DWORD a_flags, HANDLE a_template) {
+            TraceA("CreateFileA", a_name);
             if (!Bypass() && a_name) {
                 Busy busy;
                 bool handled = false;
@@ -159,6 +271,7 @@ namespace Hooks {
         // caught by the test (tests/test.cpp), not by inspection.
         HANDLE WINAPI Hook_CreateFile2(LPCWSTR a_name, DWORD a_access, DWORD a_share, DWORD a_disposition,
                                        void* a_params) {
+            Trace("CreateFile2", a_name);
             if (!Bypass()) {
                 Busy busy;
                 const auto hit = Store::Lookup(a_name);
@@ -204,6 +317,7 @@ namespace Hooks {
         }
 
         DWORD WINAPI Hook_GetFileAttributesW(LPCWSTR a_name) {
+            Trace("GetFileAttributesW", a_name);
             if (!Bypass()) {
                 Busy busy;
                 bool handled = false;
@@ -216,6 +330,7 @@ namespace Hooks {
         }
 
         DWORD WINAPI Hook_GetFileAttributesA(LPCSTR a_name) {
+            TraceA("GetFileAttributesA", a_name);
             if (!Bypass() && a_name) {
                 Busy busy;
                 bool handled = false;
@@ -248,6 +363,7 @@ namespace Hooks {
         }
 
         BOOL WINAPI Hook_GetFileAttributesExW(LPCWSTR a_name, GET_FILEEX_INFO_LEVELS a_level, LPVOID a_info) {
+            Trace("GetFileAttributesExW", a_name);
             if (!Bypass()) {
                 Busy busy;
                 bool handled = false;
@@ -260,6 +376,7 @@ namespace Hooks {
         }
 
         BOOL WINAPI Hook_GetFileAttributesExA(LPCSTR a_name, GET_FILEEX_INFO_LEVELS a_level, LPVOID a_info) {
+            TraceA("GetFileAttributesExA", a_name);
             if (!Bypass() && a_name) {
                 Busy busy;
                 bool handled = false;
@@ -434,6 +551,7 @@ namespace Hooks {
 
         HANDLE WINAPI Hook_FindFirstFileExW(LPCWSTR a_pattern, FINDEX_INFO_LEVELS a_level, LPVOID a_data,
                                             FINDEX_SEARCH_OPS a_op, LPVOID a_filter, DWORD a_flags) {
+            Trace("FindFirstFileExW", a_pattern);
             if (!Bypass() && a_data) {
                 Busy busy;
                 bool handled = false;
@@ -448,6 +566,7 @@ namespace Hooks {
 
         HANDLE WINAPI Hook_FindFirstFileExA(LPCSTR a_pattern, FINDEX_INFO_LEVELS a_level, LPVOID a_data,
                                             FINDEX_SEARCH_OPS a_op, LPVOID a_filter, DWORD a_flags) {
+            TraceA("FindFirstFileExA", a_pattern);
             if (!Bypass() && a_pattern && a_data) {
                 Busy busy;
                 bool handled = false;
@@ -465,6 +584,7 @@ namespace Hooks {
         }
 
         HANDLE WINAPI Hook_FindFirstFileW(LPCWSTR a_pattern, LPWIN32_FIND_DATAW a_data) {
+            Trace("FindFirstFileW", a_pattern);
             if (!Bypass() && a_data) {
                 Busy busy;
                 bool handled = false;
@@ -478,6 +598,7 @@ namespace Hooks {
         }
 
         HANDLE WINAPI Hook_FindFirstFileA(LPCSTR a_pattern, LPWIN32_FIND_DATAA a_data) {
+            TraceA("FindFirstFileA", a_pattern);
             if (!Bypass() && a_pattern && a_data) {
                 Busy busy;
                 bool handled = false;
@@ -610,7 +731,7 @@ namespace Hooks {
             }
 
             if (targetIsTemp) {
-                if (Store::Create(target.rel, bytes.data(), bytes.size()) != kTempFile_Ok) {
+                if (Store::Create(target.rel, bytes.data(), bytes.size()) < 0) {
                     SetLastError(ERROR_WRITE_FAULT);
                     return FALSE;
                 }
@@ -756,6 +877,17 @@ namespace Hooks {
             return Real::SetFileInformationByHandle(a_file, a_class, a_info, a_size);
         }
 
+        // Skyrim does not quit through ExitProcess: it kills itself with TerminateProcess, so DLLs
+        // never get DLL_PROCESS_DETACH and the session folder was left behind (the files themselves
+        // were already gone - DELETE_ON_CLOSE). Found by the in-game test. Clean up right before
+        // the process terminates itself.
+        BOOL WINAPI Hook_TerminateProcess(HANDLE a_process, UINT a_exitCode) {
+            if (GetProcessId(a_process) == GetCurrentProcessId()) {
+                Store::Shutdown();
+            }
+            return Real::TerminateProcess(a_process, a_exitCode);
+        }
+
         // ---------------------------------------------------------------------------------
         // Installation
         // ---------------------------------------------------------------------------------
@@ -781,6 +913,30 @@ namespace Hooks {
             logger::error("Hook {} failed: function not found", a_name);
             return false;
         }
+    }
+
+    void SetTrace(std::wstring_view a_filter) {
+        if (!a_filter.empty()) {
+            InstallNtTrace();
+            Diagnostics::ResetCallerStackBudget();
+        }
+        {
+            std::scoped_lock lock(g_traceLock);
+            g_traceFilters.clear();
+            const std::wstring lower = Store::Lower(a_filter);
+            for (std::size_t begin = 0; begin <= lower.size();) {
+                std::size_t end = lower.find(L'|', begin);
+                if (end == std::wstring::npos) {
+                    end = lower.size();
+                }
+                if (end > begin) {
+                    g_traceFilters.push_back(lower.substr(begin, end - begin));
+                }
+                begin = end + 1;
+            }
+        }
+        g_traceOn = !a_filter.empty();
+        logger::info("[trace] {} '{}'", a_filter.empty() ? "off" : "on, filter", Store::ToUtf8(a_filter));
     }
 
     bool Install() {
@@ -818,6 +974,7 @@ namespace Hooks {
         Hook("CopyFileW", &Hook_CopyFileW, Real::CopyFileW);
         Hook("CopyFileExW", &Hook_CopyFileExW, Real::CopyFileExW);
         Hook("SetFileInformationByHandle", &Hook_SetFileInformationByHandle, Real::SetFileInformationByHandle);
+        Hook("TerminateProcess", &Hook_TerminateProcess, Real::TerminateProcess);
         if (!Hook("CopyFile2", &Hook_CopyFile2, Real::CopyFile2)) {
             Real::CopyFile2 = nullptr;
         }
