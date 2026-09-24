@@ -1,3 +1,6 @@
+; SPDX-License-Identifier: MIT
+; Copyright (c) 2026 HDharder - Temp File Framework, https://github.com/HDharder/Skyrim-Temp-File-Framework
+; This script source is MIT licensed (like TempFileAPI.h) so any mod can compile against it.
 Scriptname TempFile Hidden
 {Temp File Framework - session-only overlay files for paths inside Data.
 Paths are relative to Data ("SKSE/Plugins/MyMod/config.json"). Every temp file is deleted when

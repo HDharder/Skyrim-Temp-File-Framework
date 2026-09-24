@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (c) 2026 HDharder - Temp File Framework, https://github.com/HDharder/Skyrim-Temp-File-Framework
+
 // Out-of-game test: builds the REAL Store.cpp + Hooks.cpp into an .exe, using the .exe's folder
 // as the "game folder" (Data\ next to it), and checks the redirection through the APIs mods
 // actually use (std::ifstream/ofstream, std::filesystem, Win32 A and W).

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (c) 2026 HDharder - Temp File Framework, https://github.com/HDharder/Skyrim-Temp-File-Framework
+
 // TempFileTester - in-game test for the Temp File Framework. NOT part of the release.
 //
 // Runs once, on the first frame after kDataLoaded (so every plugin's kDataLoaded handler, including

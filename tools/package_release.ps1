@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (c) 2026 HDharder - Temp File Framework
 # Builds the release archive from an existing Release build:
 #   dist\TempFileFramework-<version>.zip   (install-ready: drop into MO2/Vortex)
 #     SKSE\Plugins\TempFileFramework.dll
@@ -46,6 +48,22 @@ Write-Host "DLL: shortened $scrubbed embedded path(s)"
 
 Copy-Item (Join-Path $root 'Scripts\TempFile.pex') (Join-Path $stage 'Scripts\TempFile.pex')
 Copy-Item (Join-Path $root 'Scripts\Source\TempFile.psc') (Join-Path $stage 'Scripts\Source\TempFile.psc')
+
+# Licenses travel with the binaries (GPL-3.0 for the framework, the notices of the statically
+# linked libraries) in the plugin's own folder, so nothing lands loose in Data.
+$docs = Join-Path $stage 'SKSE\Plugins\TempFileFramework'
+New-Item -ItemType Directory -Force $docs | Out-Null
+Copy-Item (Join-Path $root 'LICENSE') (Join-Path $docs 'LICENSE.txt')
+Copy-Item (Join-Path $root 'THIRD_PARTY_NOTICES.txt') (Join-Path $docs 'THIRD_PARTY_NOTICES.txt')
+@"
+Temp File Framework $Version
+Copyright (c) 2026 HDharder
+
+Licensed under the GNU General Public License v3.0 (LICENSE.txt).
+Source code: https://github.com/HDharder/Skyrim-Temp-File-Framework/tree/v$Version
+The API header (TempFileAPI.h) and the Papyrus script source (TempFile.psc) are MIT licensed.
+Third-party notices: THIRD_PARTY_NOTICES.txt
+"@ | Set-Content (Join-Path $docs 'README.txt') -Encoding ASCII
 
 # --- Refuse to ship anything tied to this machine ------------------------------------------
 $markers = @((Resolve-Path $root).Path, $env:USERNAME, $env:COMPUTERNAME, $env:USERPROFILE) | Where-Object { $_ }

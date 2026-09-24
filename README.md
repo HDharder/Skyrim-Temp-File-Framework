@@ -164,3 +164,18 @@ triplet. With `SKYRIM_MODS_FOLDER` set, the build copies the output to
 `dist\TempFileFramework-x.y.z.zip` (DLL + compiled script + script source). It ships no PDB,
 strips source paths that prebuilt libraries embed in the DLL, and refuses to package if anything
 tied to the build machine (project folder, user or computer name) is left in the files.
+
+## License
+
+- The framework (`src/`, `Scripts/TempFile.pex`, `tools/`, `tests/`) is licensed under the
+  **GNU General Public License v3.0** - see [LICENSE](LICENSE). Modified versions and forks must
+  keep the copyright notice and stay GPL-3.0, with their source code available.
+- **[`include/TempFileAPI.h`](include/TempFileAPI.h) and [`Scripts/Source/TempFile.psc`](Scripts/Source/TempFile.psc)
+  are MIT licensed** (the license text is in each file), so any mod - open or closed source - can
+  include the header or compile scripts against the framework. Using the framework through them
+  does not put your mod under the GPL.
+- `TempFileFramework.dll` statically links CommonLibSSE-NG, MinHook, spdlog, {fmt}, Xbyak and
+  rapidcsv; their notices are in [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt) and ship with
+  every release.
+
+Copyright (c) 2026 HDharder

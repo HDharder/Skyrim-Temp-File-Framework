@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (c) 2026 HDharder - Temp File Framework
 # Compiles Scripts/Source/TempFile.psc into Scripts/TempFile.pex with the Creation Kit's compiler.
 # Only needed when the .psc changes - the compiled .pex is committed, so nobody else needs the CK.
 #
