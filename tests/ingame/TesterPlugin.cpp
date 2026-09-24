@@ -327,6 +327,103 @@ namespace {
         Log("TempFileFramework.log.");
     }
 
+    // -------------------------------------------------------------------------------------------
+    // 5. Papyrus: calls TempFile.* through the game's own Papyrus VM, exactly like another mod's
+    //    script would (the compiled TempFile.pex + the natives the framework registers). Runs once
+    //    a save is loaded, one call after the other.
+    // -------------------------------------------------------------------------------------------
+    class PapyrusCallback final : public RE::BSScript::IStackCallbackFunctor {
+    public:
+        explicit PapyrusCallback(std::function<void(const RE::BSScript::Variable&)> a_then) :
+            _then(std::move(a_then)) {}
+        void operator()(RE::BSScript::Variable a_result) override { _then(a_result); }
+        void SetObject(const RE::BSTSmartPointer<RE::BSScript::Object>&) override {}
+
+    private:
+        std::function<void(const RE::BSScript::Variable&)> _then;
+    };
+
+    struct PapyrusStep {
+        const char* function;
+        std::vector<std::string> args;
+        const char* what;
+        std::function<bool(const RE::BSScript::Variable&)> check;
+    };
+
+    constexpr auto kPapyrusPath = "SKSE/Plugins/TempFileTester/papyrus.txt";
+    constexpr auto kPapyrusContent = "hello from papyrus";
+    std::vector<PapyrusStep> g_papyrusSteps;
+    std::string g_papyrusRealPath;
+    bool g_papyrusRan = false;
+
+    std::string Describe(const RE::BSScript::Variable& a_value) {
+        if (a_value.IsBool()) {
+            return a_value.GetBool() ? "true" : "false";
+        }
+        if (a_value.IsString()) {
+            return std::format("\"{}\"", a_value.GetString());
+        }
+        return "?";
+    }
+
+    void RunPapyrusStep(std::size_t a_index) {
+        if (a_index >= g_papyrusSteps.size()) {
+            Log("");
+            Log("RESULT (with Papyrus): {} passed, {} failed", g_passed, g_failed);
+            const auto text = std::format("TempFileTester Papyrus: {} passed, {} failed", g_passed, g_failed);
+            RE::DebugNotification(text.c_str());
+            return;
+        }
+        const auto& step = g_papyrusSteps[a_index];
+        RE::BSScript::IFunctionArguments* args =
+            step.args.size() == 1
+                ? RE::MakeFunctionArguments(RE::BSFixedString(step.args[0].c_str()))
+                : RE::MakeFunctionArguments(RE::BSFixedString(step.args[0].c_str()),
+                                            RE::BSFixedString(step.args[1].c_str()));
+        RE::BSTSmartPointer<RE::BSScript::IStackCallbackFunctor> callback(
+            new PapyrusCallback([a_index](const RE::BSScript::Variable& a_result) {
+                const auto& current = g_papyrusSteps[a_index];
+                Check(current.check(a_result), current.what,
+                      std::format("TempFile.{} -> {}", current.function, Describe(a_result)));
+                RunPapyrusStep(a_index + 1);
+            }));
+        auto* vm = RE::BSScript::Internal::VirtualMachine::GetSingleton();
+        if (!vm || !vm->DispatchStaticCall("TempFile", step.function, args, callback)) {
+            Check(false, step.what, std::format("could not dispatch TempFile.{}", step.function));
+            RunPapyrusStep(a_index + 1);
+        }
+    }
+
+    void RunPapyrusTests() {
+        Log("");
+        Log("-- 5. Papyrus (TempFile.pex through the game's Papyrus VM) --");
+        const fs::path dataPath = GameDir() / "Data" / kPapyrusPath;
+        g_papyrusSteps = {
+            {"Create", {kPapyrusPath, kPapyrusContent}, "TempFile.Create returns true",
+             [](const RE::BSScript::Variable& r) { return r.IsBool() && r.GetBool(); }},
+            {"Exists", {kPapyrusPath}, "TempFile.Exists returns true, and the Data path has the content",
+             [dataPath](const RE::BSScript::Variable& r) {
+                 return r.IsBool() && r.GetBool() && ReadText(dataPath) == kPapyrusContent;
+             }},
+            {"GetRealPath", {kPapyrusPath}, "TempFile.GetRealPath returns the temp file",
+             [](const RE::BSScript::Variable& r) {
+                 g_papyrusRealPath = r.IsString() ? std::string(r.GetString()) : std::string{};
+                 return g_papyrusRealPath.find("SkyrimTempFiles") != std::string::npos;
+             }},
+            {"Copy", {kPapyrusPath}, "TempFile.Copy reuses the existing temp file (same path)",
+             [](const RE::BSScript::Variable& r) {
+                 return r.IsString() && !g_papyrusRealPath.empty() && r.GetString() == g_papyrusRealPath;
+             }},
+            {"Delete", {kPapyrusPath}, "TempFile.Delete returns true",
+             [](const RE::BSScript::Variable& r) { return r.IsBool() && r.GetBool(); }},
+            {"Exists", {kPapyrusPath}, "TempFile.Exists returns false after Delete, and the Data path is gone",
+             [dataPath](const RE::BSScript::Variable& r) {
+                 return r.IsBool() && !r.GetBool() && !fs::exists(dataPath);
+             }},
+        };
+        RunPapyrusStep(0);
+    }
+
     void Notify() {
         const auto text = std::format("TempFileTester: {} passed, {} failed", g_passed, g_failed);
         RE::DebugNotification(text.c_str());
@@ -341,6 +438,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse) {
     SetupLog();
 
     SKSE::GetMessagingInterface()->RegisterListener([](SKSE::MessagingInterface::Message* a_message) {
+        Log("[skse] message {}", a_message->type);
         switch (a_message->type) {
             case SKSE::MessagingInterface::kPostLoad:
                 EarlyReserve();
@@ -350,6 +448,11 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse) {
                     if (!g_ran) {
                         g_ran = true;
                         RunTests();
+                        // Queued in the Papyrus VM: the calls run as soon as it processes them.
+                        if (!g_papyrusRan) {
+                            g_papyrusRan = true;
+                            RunPapyrusTests();
+                        }
                     }
                 });
                 break;

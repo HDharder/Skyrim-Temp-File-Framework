@@ -50,7 +50,9 @@ if (const auto* tf = TempFile::GetAPI()) {
 
 ## Using it from Papyrus
 
-[`Scripts/Source/TempFile.psc`](Scripts/Source/TempFile.psc) (compile it with the Creation Kit compiler):
+The compiled script ships with the mod (`Scripts/TempFile.pex`); the source is
+[`Scripts/Source/TempFile.psc`](Scripts/Source/TempFile.psc). Only this framework's developers
+need the Creation Kit: `tools\compile_papyrus.ps1` rebuilds the `.pex` after the `.psc` changes.
 
 ```papyrus
 string real = TempFile.Copy("SKSE/Plugins/MyMod/config.json")
@@ -157,3 +159,8 @@ game's model loader can be checked by eye (`player.additem 0001397E 1`, `00012EB
 CMake + vcpkg (`commonlibsse-ng`, `minhook`), `debug`/`release` presets, `x64-windows-static`
 triplet. With `SKYRIM_MODS_FOLDER` set, the build copies the output to
 `<mods>\TempFileFramework\SKSE\Plugins\`.
+
+`tools\package_release.ps1 -Version x.y.z` turns a Release build into the install-ready
+`dist\TempFileFramework-x.y.z.zip` (DLL + compiled script + script source). It ships no PDB,
+strips source paths that prebuilt libraries embed in the DLL, and refuses to package if anything
+tied to the build machine (project folder, user or computer name) is left in the files.

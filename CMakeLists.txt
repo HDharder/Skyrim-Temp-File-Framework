@@ -30,6 +30,12 @@ target_precompile_headers(${PROJECT_NAME} PRIVATE PCH.h)
 target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}" include src)
 target_link_libraries(${PROJECT_NAME} PRIVATE minhook::minhook shell32 ole32)
 
+# Source paths end up inside the binaries (__FILE__, std::source_location in logging, asserts).
+# Trim them to paths relative to the project, so a published DLL says nothing about the folder -
+# or the machine - it was built on.
+file(TO_NATIVE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/" TFF_SOURCE_PREFIX)
+target_compile_options(${PROJECT_NAME} PRIVATE "/d1trimfile:${TFF_SOURCE_PREFIX}")
+
 # Real Release PDB: without /Zi an MSVC Release build produces no PDB, leaving CrashLogger with
 # no symbols matching the DLL.
 target_compile_options(${PROJECT_NAME} PRIVATE $<$<CONFIG:Release>:/Zi>)
@@ -77,6 +83,7 @@ if(DEFINED OUTPUT_FOLDER)
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_PDB_FILE:${PROJECT_NAME}>" "${DLL_FOLDER}/$<TARGET_PDB_FILE_NAME:${PROJECT_NAME}>"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${OUTPUT_FOLDER}/Scripts/Source"
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/Scripts/Source/TempFile.psc" "${OUTPUT_FOLDER}/Scripts/Source/TempFile.psc"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/Scripts/TempFile.pex" "${OUTPUT_FOLDER}/Scripts/TempFile.pex"
         VERBATIM
     )
 endif()
