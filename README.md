@@ -60,6 +60,32 @@ TempFile.Create("SKSE/Plugins/MyMod/state.txt", "content")
 TempFile.Delete("SKSE/Plugins/MyMod/state.txt")
 ```
 
+## Session-only paths (for players and modlists)
+
+Optional, **off by default**. Paths listed here never get written to disk: when any mod writes to
+a matching path, the file becomes a session-only temp file first, so nothing lands in `Data` or in
+MO2's `overwrite` folder, and it is gone when the game closes. This works for **any** mod - it does
+not need to know about the framework.
+
+`Data\SKSE\Plugins\TempFileFramework.ini`:
+
+```ini
+[SessionOnly]
+SKSE/Plugins/SomeMod/cache/*
+SKSE/Plugins/*.log
+```
+
+- One path per line, relative to `Data`; `*` matches anything (subfolders included), `?` one
+  character; case does not matter.
+- Mods and modlists can ship their own list without touching the player's file: any `.ini` with a
+  `[SessionOnly]` section in `Data\SKSE\Plugins\TempFileFramework\SessionOnly\`.
+- Writing an existing file starts from its current content (appending works), and the file on disk
+  keeps its original content. Folders created under these paths only exist in the session too.
+- **Only list files that are safe to lose every session** - caches, logs, data rebuilt at
+  startup. Settings and saves (MCM settings, PapyrusUtil/JContainers data, RaceMenu presets...)
+  would be wiped every time the game closes.
+- It prevents new clutter; it does not repair an `overwrite` folder that is already broken.
+
 ## How it works
 
 **Redirection** - hooks (MinHook) on the Windows file API in `kernelbase`, which cover the whole
@@ -139,9 +165,9 @@ logs every file call whose path contains `filter`, at the Win32 and the ntdll la
 ## Out-of-game test
 
 `tests\run_tests.bat` builds the real `Store.cpp` + `Hooks.cpp` into a plain .exe (the .exe's
-folder plays the part of the game folder) and checks 72 cases: redirection through
+folder plays the part of the game folder) and checks 96 cases: redirection through
 `ifstream`/`ofstream`, `std::filesystem`, Win32 A/W, folder listings, "save to .tmp + rename",
-`copy_file`, `fs::remove`, deleting while the file is open, invalid paths, **CTD** and **exit**.
+`copy_file`, `fs::remove`, deleting while the file is open, invalid paths, session-only paths, **CTD** and **exit**.
 In the CTD test a child process creates a temp file and is killed without running any of our
 code; the test checks that Windows deleted the file and that the next launch's sweep deletes the
 folder. In the exit test a child quits the way Skyrim does (`TerminateProcess` on itself) and the

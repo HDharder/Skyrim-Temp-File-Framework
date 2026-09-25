@@ -6,6 +6,7 @@
 #include "Hooks.h"
 #include "LogDir.h"
 #include "Papyrus.h"
+#include "SessionPaths.h"
 #include "Store.h"
 
 namespace {
@@ -44,7 +45,11 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse) {
     SKSE::Init(a_skse);
     SetupLog();
 
-    if (!Store::Init() || !Hooks::Install()) {
+    const bool stored = Store::Init();
+    if (stored) {
+        SessionPaths::Load(Store::DataDir());  // before the hooks: plain reads through the MO2 VFS
+    }
+    if (!stored || !Hooks::Install()) {
         logger::critical("Temp File Framework is DISABLED for this session");
         return true;  // do not take the game down because of this
     }

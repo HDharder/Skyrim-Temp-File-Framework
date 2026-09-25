@@ -5,6 +5,7 @@
 
 #include "CallStack.h"
 #include "Real.h"
+#include "SessionPaths.h"
 #include "Store.h"
 
 // General rule of every hook here:
@@ -206,6 +207,67 @@ namespace Hooks {
         }
 
         // ---------------------------------------------------------------------------------
+        // Session-only paths (SessionPaths.h): runs BEFORE the normal redirection, even when no temp
+        // file exists yet, and only does anything when the player configured patterns.
+        // ---------------------------------------------------------------------------------
+        bool IsWriteIntent(DWORD a_access, DWORD a_disposition) {
+            constexpr DWORD kWriteAccess = GENERIC_WRITE | GENERIC_ALL | FILE_WRITE_DATA | FILE_APPEND_DATA;
+            return (a_access & kWriteAccess) != 0 || a_disposition == CREATE_NEW || a_disposition == CREATE_ALWAYS ||
+                   a_disposition == TRUNCATE_EXISTING || a_disposition == OPEN_ALWAYS;
+        }
+
+        // A session-only Data path about to be written, as its Data-relative path; nullopt otherwise.
+        std::optional<std::wstring> SessionTarget(LPCWSTR a_name) {
+            std::wstring full;
+            std::wstring rel;
+            if (!a_name || !Store::FullPath(a_name, full) || !Store::ToDataRel(full, rel) || rel.empty() ||
+                !SessionPaths::MatchesFile(Store::Lower(rel))) {
+                return std::nullopt;
+            }
+            return rel;
+        }
+
+        // Gives a session-only path its temp file before the write happens, starting from the
+        // current file unless the write replaces it anyway.
+        void PrepareSessionWrite(LPCWSTR a_name, DWORD a_disposition) {
+            if (!SessionPaths::Active() || t_busy) {
+                return;
+            }
+            Busy busy;
+            const auto rel = SessionTarget(a_name);
+            if (!rel || Store::Exists(*rel)) {
+                return;
+            }
+            const bool mustExist = a_disposition == OPEN_EXISTING || a_disposition == TRUNCATE_EXISTING;
+            if (mustExist && Real::GetFileAttributesW(Store::DataPathOf(*rel).c_str()) == INVALID_FILE_ATTRIBUTES) {
+                return;  // opening a file that does not exist: let the call fail as it would
+            }
+            const bool replaces = a_disposition == CREATE_ALWAYS || a_disposition == TRUNCATE_EXISTING;
+            Store::EnsureSessionFile(*rel, !replaces);
+        }
+
+        // Move/copy onto a session-only path. Returns true when the destination became a temp file
+        // (the transfer then replaces it); false leaves the call alone - including "the destination
+        // already exists and the caller did not ask to replace it", which must still fail.
+        bool PrepareSessionTarget(LPCWSTR a_target, bool a_replace) {
+            if (!SessionPaths::Active() || t_busy) {
+                return false;
+            }
+            Busy busy;
+            const auto rel = SessionTarget(a_target);
+            if (!rel) {
+                return false;
+            }
+            if (Store::Exists(*rel)) {
+                return a_replace;
+            }
+            if (!a_replace && Real::GetFileAttributesW(Store::DataPathOf(*rel).c_str()) != INVALID_FILE_ATTRIBUTES) {
+                return false;
+            }
+            return Store::EnsureSessionFile(*rel, false) >= 0;
+        }
+
+        // ---------------------------------------------------------------------------------
         // CreateFile
         // ---------------------------------------------------------------------------------
         HANDLE CreateFileCore(LPCWSTR a_name, DWORD a_access, DWORD a_share, LPSECURITY_ATTRIBUTES a_security,
@@ -242,6 +304,9 @@ namespace Hooks {
                                        LPSECURITY_ATTRIBUTES a_security, DWORD a_disposition, DWORD a_flags,
                                        HANDLE a_template) {
             Trace("CreateFileW", a_name);
+            if (IsWriteIntent(a_access, a_disposition)) {
+                PrepareSessionWrite(a_name, a_disposition);
+            }
             if (!Bypass()) {
                 Busy busy;
                 bool handled = false;
@@ -257,6 +322,9 @@ namespace Hooks {
         HANDLE WINAPI Hook_CreateFileA(LPCSTR a_name, DWORD a_access, DWORD a_share, LPSECURITY_ATTRIBUTES a_security,
                                        DWORD a_disposition, DWORD a_flags, HANDLE a_template) {
             TraceA("CreateFileA", a_name);
+            if (a_name && SessionPaths::Active() && IsWriteIntent(a_access, a_disposition)) {
+                PrepareSessionWrite(AnsiToWide(a_name).c_str(), a_disposition);
+            }
             if (!Bypass() && a_name) {
                 Busy busy;
                 bool handled = false;
@@ -275,6 +343,9 @@ namespace Hooks {
         HANDLE WINAPI Hook_CreateFile2(LPCWSTR a_name, DWORD a_access, DWORD a_share, DWORD a_disposition,
                                        void* a_params) {
             Trace("CreateFile2", a_name);
+            if (IsWriteIntent(a_access, a_disposition)) {
+                PrepareSessionWrite(a_name, a_disposition);
+            }
             if (!Bypass()) {
                 Busy busy;
                 const auto hit = Store::Lookup(a_name);
@@ -753,11 +824,12 @@ namespace Hooks {
         }
 
         BOOL WINAPI Hook_MoveFileExW(LPCWSTR a_source, LPCWSTR a_target, DWORD a_flags) {
+            const bool replace = a_flags & MOVEFILE_REPLACE_EXISTING;
+            const bool session = PrepareSessionTarget(a_target, replace);
             if (!Bypass()) {
                 Busy busy;
                 bool handled = false;
-                const BOOL result =
-                    TransferCore(a_source, a_target, a_flags & MOVEFILE_REPLACE_EXISTING, true, handled);
+                const BOOL result = TransferCore(a_source, a_target, replace || session, true, handled);
                 if (handled) {
                     return result;
                 }
@@ -767,11 +839,12 @@ namespace Hooks {
 
         BOOL WINAPI Hook_MoveFileWithProgressW(LPCWSTR a_source, LPCWSTR a_target, LPPROGRESS_ROUTINE a_progress,
                                                LPVOID a_data, DWORD a_flags) {
+            const bool replace = a_flags & MOVEFILE_REPLACE_EXISTING;
+            const bool session = PrepareSessionTarget(a_target, replace);
             if (!Bypass()) {
                 Busy busy;
                 bool handled = false;
-                const BOOL result =
-                    TransferCore(a_source, a_target, a_flags & MOVEFILE_REPLACE_EXISTING, true, handled);
+                const BOOL result = TransferCore(a_source, a_target, replace || session, true, handled);
                 if (handled) {
                     return result;
                 }
@@ -781,6 +854,7 @@ namespace Hooks {
 
         BOOL WINAPI Hook_ReplaceFileW(LPCWSTR a_replaced, LPCWSTR a_replacement, LPCWSTR a_backup, DWORD a_flags,
                                       LPVOID a_exclude, LPVOID a_reserved) {
+            PrepareSessionTarget(a_replaced, true);
             if (!Bypass() && a_replaced) {
                 Busy busy;
                 const auto replaced = Store::Lookup(a_replaced);
@@ -800,10 +874,11 @@ namespace Hooks {
         }
 
         BOOL WINAPI Hook_CopyFileW(LPCWSTR a_source, LPCWSTR a_target, BOOL a_failIfExists) {
+            const bool session = PrepareSessionTarget(a_target, !a_failIfExists);
             if (!Bypass()) {
                 Busy busy;
                 bool handled = false;
-                const BOOL result = TransferCore(a_source, a_target, !a_failIfExists, false, handled);
+                const BOOL result = TransferCore(a_source, a_target, !a_failIfExists || session, false, handled);
                 if (handled) {
                     return result;
                 }
@@ -813,11 +888,12 @@ namespace Hooks {
 
         BOOL WINAPI Hook_CopyFileExW(LPCWSTR a_source, LPCWSTR a_target, LPPROGRESS_ROUTINE a_progress, LPVOID a_data,
                                      LPBOOL a_cancel, DWORD a_flags) {
+            const bool replace = !(a_flags & COPY_FILE_FAIL_IF_EXISTS);
+            const bool session = PrepareSessionTarget(a_target, replace);
             if (!Bypass()) {
                 Busy busy;
                 bool handled = false;
-                const BOOL result =
-                    TransferCore(a_source, a_target, !(a_flags & COPY_FILE_FAIL_IF_EXISTS), false, handled);
+                const BOOL result = TransferCore(a_source, a_target, replace || session, false, handled);
                 if (handled) {
                     return result;
                 }
@@ -827,11 +903,12 @@ namespace Hooks {
 
         // MSVC's std::filesystem::copy_file uses CopyFile2.
         HRESULT WINAPI Hook_CopyFile2(PCWSTR a_source, PCWSTR a_target, TFF_CopyFile2Params* a_params) {
+            const bool failIfExists = a_params && (a_params->dwCopyFlags & COPY_FILE_FAIL_IF_EXISTS);
+            const bool session = PrepareSessionTarget(a_target, !failIfExists);
             if (!Bypass()) {
                 Busy busy;
-                const bool failIfExists = a_params && (a_params->dwCopyFlags & COPY_FILE_FAIL_IF_EXISTS);
                 bool handled = false;
-                const BOOL result = TransferCore(a_source, a_target, !failIfExists, false, handled);
+                const BOOL result = TransferCore(a_source, a_target, !failIfExists || session, false, handled);
                 if (handled) {
                     return result ? S_OK : HRESULT_FROM_WIN32(GetLastError());
                 }
@@ -889,6 +966,54 @@ namespace Hooks {
                 Store::Shutdown();
             }
             return Real::TerminateProcess(a_process, a_exitCode);
+        }
+
+        // Folders created under session-only paths live only in the session too - otherwise MO2 keeps
+        // them as empty folders in overwrite. A folder that already exists (in Data or a mod) is left
+        // to the normal call, which reports it.
+        BOOL CreateDirectoryCore(LPCWSTR a_name, bool& a_handled) {
+            a_handled = false;
+            std::wstring full;
+            std::wstring rel;
+            if (!a_name || !Store::FullPath(a_name, full) || !Store::ToDataRel(full, rel) || rel.empty() ||
+                !SessionPaths::MatchesDirectory(Store::Lower(rel)) ||
+                Real::GetFileAttributesW(full.c_str()) != INVALID_FILE_ATTRIBUTES) {
+                return FALSE;
+            }
+            a_handled = true;
+            if (Store::Lookup(a_name).kind != Store::Kind::None) {
+                SetLastError(ERROR_ALREADY_EXISTS);
+                return FALSE;
+            }
+            if (Store::CreateSessionDirectory(rel) < 0) {
+                SetLastError(ERROR_PATH_NOT_FOUND);
+                return FALSE;
+            }
+            return TRUE;
+        }
+
+        BOOL WINAPI Hook_CreateDirectoryW(LPCWSTR a_name, LPSECURITY_ATTRIBUTES a_security) {
+            if (SessionPaths::Active() && !t_busy) {
+                Busy busy;
+                bool handled = false;
+                const BOOL result = CreateDirectoryCore(a_name, handled);
+                if (handled) {
+                    return result;
+                }
+            }
+            return Real::CreateDirectoryW(a_name, a_security);
+        }
+
+        BOOL WINAPI Hook_CreateDirectoryA(LPCSTR a_name, LPSECURITY_ATTRIBUTES a_security) {
+            if (SessionPaths::Active() && !t_busy && a_name) {
+                Busy busy;
+                bool handled = false;
+                const BOOL result = CreateDirectoryCore(AnsiToWide(a_name).c_str(), handled);
+                if (handled) {
+                    return result;
+                }
+            }
+            return Real::CreateDirectoryA(a_name, a_security);
         }
 
         // ---------------------------------------------------------------------------------
@@ -978,6 +1103,8 @@ namespace Hooks {
         Hook("CopyFileExW", &Hook_CopyFileExW, Real::CopyFileExW);
         Hook("SetFileInformationByHandle", &Hook_SetFileInformationByHandle, Real::SetFileInformationByHandle);
         Hook("TerminateProcess", &Hook_TerminateProcess, Real::TerminateProcess);
+        Hook("CreateDirectoryW", &Hook_CreateDirectoryW, Real::CreateDirectoryW);
+        Hook("CreateDirectoryA", &Hook_CreateDirectoryA, Real::CreateDirectoryA);
         if (!Hook("CopyFile2", &Hook_CopyFile2, Real::CopyFile2)) {
             Real::CopyFile2 = nullptr;
         }

@@ -48,6 +48,7 @@ Write-Host "DLL: shortened $scrubbed embedded path(s)"
 
 Copy-Item (Join-Path $root 'Scripts\TempFile.pex') (Join-Path $stage 'Scripts\TempFile.pex')
 Copy-Item (Join-Path $root 'Scripts\Source\TempFile.psc') (Join-Path $stage 'Scripts\Source\TempFile.psc')
+Copy-Item (Join-Path $root 'SKSE\Plugins\TempFileFramework.ini') (Join-Path $stage 'SKSE\Plugins\TempFileFramework.ini')
 
 # Licenses travel with the binaries (GPL-3.0 for the framework, the notices of the statically
 # linked libraries) in the plugin's own folder, so nothing lands loose in Data.

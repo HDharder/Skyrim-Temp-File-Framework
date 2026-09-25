@@ -20,6 +20,8 @@ namespace Store {
         // wanted g_opLock, that would deadlock.
         std::shared_mutex g_mapLock;
         std::unordered_map<std::wstring, Entry> g_entries;
+        // Session-only folders (lowercase key -> Data-relative path as created), also under g_mapLock.
+        std::unordered_map<std::wstring, std::wstring> g_sessionDirs;
         std::atomic<std::size_t> g_count{0};
         std::mutex g_opLock;
 
@@ -232,8 +234,10 @@ namespace Store {
             return stream.good() && stream.stream;
         }
 
+        // `a_engine`: also make the game engine see it (resource index, BSA check). Off for session-only
+        // files, which are created from inside the file API hooks - the engine is not called from there.
         Result CreateLocked(const std::wstring& a_key, const std::wstring& a_display, const void* a_data,
-                            std::size_t a_size) {
+                            std::size_t a_size, bool a_engine = true) {
             std::optional<std::wstring> existing;
             {
                 std::shared_lock lock(g_mapLock);
@@ -252,7 +256,7 @@ namespace Store {
                 return kTempFile_Ok;
             }
 
-            const bool archiveLocked = IsArchiveOnly(a_display);
+            const bool archiveLocked = a_engine && IsArchiveOnly(a_display);
             const std::wstring real = g_filesRoot + a_display;
             const HANDLE anchor = OpenAnchor(real);
             if (anchor == INVALID_HANDLE_VALUE) {
@@ -270,11 +274,13 @@ namespace Store {
             {
                 std::unique_lock lock(g_mapLock);
                 g_entries.emplace(a_key, Entry{real, a_display, anchor});
-                g_count = g_entries.size();
+                g_count = g_entries.size() + g_sessionDirs.size();
             }
-            ArchiveBypass::OnCreated(a_display);
-            logger::info("Created temp file '{}' ({} bytes){}", ToUtf8(a_display), a_size,
-                         archiveLocked && ArchiveBypass::Active() ? ", overriding its BSA copy" : "");
+            if (a_engine) {
+                ArchiveBypass::OnCreated(a_display);
+            }
+            logger::info("Created {}temp file '{}' ({} bytes){}", a_engine ? "" : "session-only ", ToUtf8(a_display),
+                         a_size, archiveLocked && ArchiveBypass::Active() ? ", overriding its BSA copy" : "");
             if (archiveLocked && !ArchiveBypass::Active()) {
                 logger::warn("'{}' only exists inside a BSA the game has already loaded: the engine keeps using "
                              "the BSA copy. Create it before the archives load (kPostLoad) to override it.",
@@ -549,6 +555,7 @@ namespace Store {
             CloseHandle(entry.anchor);
         }
         g_entries.clear();
+        g_sessionDirs.clear();
         g_count = 0;
         lock.unlock();
         RemoveTree(g_sessionDir);
@@ -576,11 +583,15 @@ namespace Store {
         if (const auto it = g_entries.find(key); it != g_entries.end()) {
             return {Kind::File, std::move(rel), it->second.real};
         }
-        for (const auto& [entryKey, entry] : g_entries) {
-            if (entryKey.size() > key.size() && entryKey[key.size()] == L'\\' && entryKey.starts_with(key)) {
-                std::wstring real = g_filesRoot + rel;
-                return {Kind::VirtualDir, std::move(rel), std::move(real)};
-            }
+        const auto under = [&](const std::wstring& a_candidate) {
+            return a_candidate.size() > key.size() && a_candidate[key.size()] == L'\\' && a_candidate.starts_with(key);
+        };
+        const bool virtualDir = g_sessionDirs.contains(key) ||
+                                std::ranges::any_of(g_entries, [&](const auto& a_entry) { return under(a_entry.first); }) ||
+                                std::ranges::any_of(g_sessionDirs, [&](const auto& a_dir) { return under(a_dir.first); });
+        if (virtualDir) {
+            std::wstring real = g_filesRoot + rel;
+            return {Kind::VirtualDir, std::move(rel), std::move(real)};
         }
         return {};
     }
@@ -634,7 +645,66 @@ namespace Store {
             std::wstring physical = isFile ? entry.real : g_filesRoot + FirstComponents(entry.display, depth + 1);
             out.push_back({std::move(name), std::move(physical), isFile});
         }
+        for (const auto& [key, display] : g_sessionDirs) {
+            if (key.size() <= prefix.size() || !key.starts_with(prefix)) {
+                continue;
+            }
+            const std::wstring_view rest = std::wstring_view(key).substr(prefix.size());
+            std::wstring name(rest.substr(0, rest.find(L'\\')));
+            if (!seen.insert(name).second) {
+                continue;
+            }
+            out.push_back({std::move(name), g_filesRoot + FirstComponents(display, depth + 1), false});
+        }
         return out;
+    }
+
+    const std::wstring& DataDir() { return g_dataDir; }
+
+    Result EnsureSessionFile(std::wstring_view a_rel, bool a_keepContent) {
+        const auto display = Normalize(a_rel);
+        if (!display) {
+            return kTempFile_InvalidPath;
+        }
+        const std::wstring key = Lower(*display);
+        std::scoped_lock op(g_opLock);
+        {
+            std::shared_lock lock(g_mapLock);
+            if (g_entries.contains(key)) {
+                return kTempFile_AlreadyExists;
+            }
+        }
+        // Loose files only (through the MO2 VFS): this runs inside the file API hooks, so the
+        // engine's archive reader is off limits here. A missing file simply starts empty.
+        std::vector<std::byte> bytes;
+        if (a_keepContent) {
+            ReadWholeFile(g_dataDir + *display, bytes);
+        }
+        return CreateLocked(key, *display, bytes.data(), bytes.size(), false);
+    }
+
+    Result CreateSessionDirectory(std::wstring_view a_rel) {
+        const auto display = Normalize(a_rel);
+        if (!display) {
+            return kTempFile_InvalidPath;
+        }
+        const std::wstring key = Lower(*display);
+        std::scoped_lock op(g_opLock);
+        {
+            std::shared_lock lock(g_mapLock);
+            if (g_sessionDirs.contains(key)) {
+                return kTempFile_AlreadyExists;
+            }
+        }
+        const std::wstring physical = g_filesRoot + *display + L"\\";
+        EnsureParentDirs(physical);
+        {
+            std::unique_lock lock(g_mapLock);
+            g_sessionDirs.emplace(key, *display);
+            g_count = g_entries.size() + g_sessionDirs.size();
+        }
+        logger::info("Created session-only folder '{}'", ToUtf8(*display));
+        return kTempFile_Ok;
     }
 
     Result Copy(std::wstring_view a_rel) {
@@ -692,7 +762,7 @@ namespace Store {
             }
             entry = std::move(it->second);
             g_entries.erase(it);
-            g_count = g_entries.size();
+            g_count = g_entries.size() + g_sessionDirs.size();
         }
         ArchiveBypass::OnDeleted(entry.display);
         Retire(entry);

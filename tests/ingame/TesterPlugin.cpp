@@ -313,6 +313,20 @@ namespace {
         // File-level and archive-index trace for everything the visual check will load.
         SetTrace("irondagger|longsword|lateroll|earlyroll");
 
+        // Session-only paths, configured by the drop-in ini this tester ships
+        // (SKSE\Plugins\TempFileFramework\SessionOnly\TempFileTester.ini).
+        Log("");
+        Log("-- 6. Session-only paths (drop-in ini) --");
+        const fs::path sessionDir = data / "SKSE/Plugins/TempFileTester/session/cache";
+        std::error_code sessionError;
+        fs::create_directories(sessionDir, sessionError);
+        Check(!sessionError && fs::is_directory(sessionDir), "a folder under a session-only path can be created");
+        WriteText(sessionDir / "state.json", "SESSION");
+        Check(ReadText(sessionDir / "state.json") == "SESSION", "a file written there reads back");
+        Check(api->Exists("SKSE/Plugins/TempFileTester/session/cache/state.json"),
+              "it is a session-only temp file, not a file on disk");
+        Log("After quitting, MO2's overwrite folder must NOT contain SKSE\\Plugins\\TempFileTester\\session.");
+
         Log("");
         Log("RESULT: {} passed, {} failed", g_passed, g_failed);
         Log("");

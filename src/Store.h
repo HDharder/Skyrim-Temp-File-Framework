@@ -54,6 +54,14 @@ namespace Store {
     bool Exists(std::wstring_view a_rel);
     std::optional<std::wstring> GetRealPath(std::wstring_view a_rel);
 
+    // --- Session-only paths (see SessionPaths.h); called from the hooks ---
+    // Makes sure a temp file exists for a path about to be written. `a_keepContent`: start from
+    // the current file (loose / MO2 VFS only - never the engine); otherwise start empty.
+    Result EnsureSessionFile(std::wstring_view a_rel, bool a_keepContent);
+    // A folder that exists only for this session (visible like the folders of temp files).
+    Result CreateSessionDirectory(std::wstring_view a_rel);
+    const std::wstring& DataDir();
+
     // --- Shared utilities ---
     bool FullPath(LPCWSTR a_path, std::wstring& a_out);
     bool ToDataRel(std::wstring_view a_full, std::wstring& a_rel);

@@ -6,6 +6,7 @@
 // actually use (std::ifstream/ofstream, std::filesystem, Win32 A and W).
 #include "Hooks.h"
 #include "Real.h"
+#include "SessionPaths.h"
 #include "Store.h"
 
 #include <filesystem>
@@ -147,10 +148,24 @@ int main(int argc, char** argv) {
     fs::remove_all(data);
     fs::create_directories(mod);
     WriteStd(mod / "orig.json", "ORIGINAL");
+
+    // Session-only configuration, in place before the framework starts (as in game): the player's
+    // ini plus a drop-in file from "another mod".
+    const fs::path sessionMod = data / "SKSE" / "Plugins" / "SessionMod";
+    fs::create_directories(sessionMod);
+    fs::create_directories(data / "SKSE/Plugins/TempFileFramework/SessionOnly");
+    WriteStd(data / "SKSE/Plugins/TempFileFramework.ini",
+             "; comment\n[General]\nSKSE/Plugins/NotASessionPath/*\n\n[SessionOnly]\nSKSE/Plugins/SessionMod/*\n"
+             "Data/SKSE/Plugins/NewSessionMod/cache/*\n");
+    WriteStd(data / "SKSE/Plugins/TempFileFramework/SessionOnly/logs.ini", "[SessionOnly]\n*.log\n");
+    WriteStd(sessionMod / "existing.txt", "OLD");
+    WriteStd(sessionMod / "append.txt", "A1");
     SetCurrentDirectoryW(ExeDir().c_str());
 
     std::printf("\n== init ==\n");
     CHECK(Store::Init());
+    SessionPaths::Load(Store::DataDir());
+    CHECK(SessionPaths::Active());
     CHECK(Hooks::Install());
 
     std::printf("\n== Copy ==\n");
@@ -200,7 +215,8 @@ int main(int argc, char** argv) {
     std::printf("\n== folders that only exist because of temp files ==\n");
     CHECK(Store::Create(L"SKSE/Plugins/VirtualDir/deep/x.txt", "X", 1) == kTempFile_Ok);
     CHECK(fs::is_directory(data / "SKSE/Plugins/VirtualDir"));
-    CHECK(List(data / "SKSE/Plugins") == (std::vector<std::string>{"TFFTest/", "VirtualDir/"}));
+    CHECK(List(data / "SKSE/Plugins") == (std::vector<std::string>{"SessionMod/", "TFFTest/", "TempFileFramework.ini",
+                                                                 "TempFileFramework/", "VirtualDir/"}));
     CHECK(List(data / "SKSE/Plugins/VirtualDir") == (std::vector<std::string>{"deep/"}));
     CHECK(List(data / "SKSE/Plugins/VirtualDir/deep") == (std::vector<std::string>{"x.txt"}));
     CHECK(ReadStd(data / "SKSE/Plugins/VirtualDir/deep/x.txt") == "X");
@@ -209,7 +225,7 @@ int main(int argc, char** argv) {
         for (const auto& entry : fs::recursive_directory_iterator(data)) {
             count += entry.is_regular_file() ? 1 : 0;
         }
-        CHECK(count == 3);  // orig.json, new.bin, deep/x.txt
+        CHECK(count == 7);  // orig.json, new.bin, deep/x.txt + the 2 ini files and 2 SessionMod files
     }
 
     std::printf("\n== 'safe save' pattern: write .tmp and rename over it ==\n");
@@ -282,6 +298,61 @@ int main(int argc, char** argv) {
     CHECK(Store::Create(L"C:/evil.txt", "x", 1) == kTempFile_InvalidPath);
     CHECK(Store::Create(L"", "x", 1) == kTempFile_InvalidPath);
     CHECK(Store::Copy(L"SKSE/Plugins/TFFTest/does_not_exist.json") == kTempFile_NotFound);
+
+    std::printf("\n== session-only paths (TempFileFramework.ini + drop-in) ==\n");
+    {
+        const auto isReal = [](const fs::path& a_path) {
+            return Real::GetFileAttributesW(a_path.c_str()) != INVALID_FILE_ATTRIBUTES;
+        };
+        // Reading does nothing special.
+        CHECK(ReadStd(sessionMod / "existing.txt") == "OLD");
+        CHECK(!Store::Exists(L"SKSE/Plugins/SessionMod/existing.txt"));
+        // Writing an existing file: the change lands in a temp file, the real one keeps its content.
+        WriteStd(sessionMod / "existing.txt", "NEW");
+        CHECK(Store::Exists(L"SKSE/Plugins/SessionMod/existing.txt"));
+        CHECK(ReadStd(sessionMod / "existing.txt") == "NEW");
+        CHECK(ReadRaw(sessionMod / "existing.txt") == "OLD");
+        // Appending starts from the current content.
+        {
+            std::ofstream file(sessionMod / "append.txt", std::ios::binary | std::ios::app);
+            file << "A2";
+        }
+        CHECK(ReadStd(sessionMod / "append.txt") == "A1A2");
+        CHECK(ReadRaw(sessionMod / "append.txt") == "A1");
+        // New folders and files under a session path never reach the disk.
+        std::error_code ec;
+        CHECK(fs::create_directories(sessionMod / "cache" / "deep", ec) && !ec);
+        CHECK(fs::is_directory(sessionMod / "cache" / "deep"));
+        CHECK(!isReal(sessionMod / "cache"));
+        WriteStd(sessionMod / "cache" / "deep" / "data.bin", "BIN");
+        CHECK(ReadStd(sessionMod / "cache" / "deep" / "data.bin") == "BIN");
+        CHECK(!isReal(sessionMod / "cache" / "deep" / "data.bin"));
+        CHECK(List(sessionMod) == (std::vector<std::string>{"append.txt", "cache/", "existing.txt"}));
+        // The folders leading to a pattern are session-only when they do not exist yet.
+        CHECK(fs::create_directories(data / "SKSE/Plugins/NewSessionMod/cache", ec) && !ec);
+        WriteStd(data / "SKSE/Plugins/NewSessionMod/cache/x.json", "X");
+        CHECK(ReadStd(data / "SKSE/Plugins/NewSessionMod/cache/x.json") == "X");
+        CHECK(!isReal(data / "SKSE/Plugins/NewSessionMod"));
+        // Drop-in pattern: any .log.
+        WriteStd(mod / "debug.log", "LOG");
+        CHECK(ReadStd(mod / "debug.log") == "LOG");
+        CHECK(!isReal(mod / "debug.log"));
+        // "Safe save" from a normal file onto a session path.
+        WriteStd(mod / "safe.tmp", "SAFE");
+        fs::rename(mod / "safe.tmp", sessionMod / "saved.json");
+        CHECK(ReadStd(sessionMod / "saved.json") == "SAFE");
+        CHECK(!isReal(sessionMod / "saved.json") && !isReal(mod / "safe.tmp"));
+        // Paths outside the patterns - and outside [SessionOnly] - still write to disk.
+        WriteStd(mod / "persistent.txt", "KEEP");
+        CHECK(ReadRaw(mod / "persistent.txt") == "KEEP");
+        fs::create_directories(data / "SKSE/Plugins/NotASessionPath");
+        CHECK(isReal(data / "SKSE/Plugins/NotASessionPath"));
+        fs::remove(mod / "persistent.txt");
+        // Opening a missing session file for reading/writing without creating it still fails.
+        const HANDLE missing = CreateFileW((sessionMod / "missing.txt").c_str(), GENERIC_WRITE, 0, nullptr,
+                                           OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        CHECK(missing == INVALID_HANDLE_VALUE && !Store::Exists(L"SKSE/Plugins/SessionMod/missing.txt"));
+    }
 
     std::printf("\n== CTD: child creates a temp file and is killed with TerminateProcess ==\n");
     fs::remove(ExeDir() / "child_out.txt");

@@ -47,6 +47,8 @@ namespace Real {
     inline decltype(&::CopyFileExW) CopyFileExW = ::CopyFileExW;
     inline decltype(&::SetFileInformationByHandle) SetFileInformationByHandle = ::SetFileInformationByHandle;
     inline decltype(&::TerminateProcess) TerminateProcess = ::TerminateProcess;
+    inline decltype(&::CreateDirectoryW) CreateDirectoryW = ::CreateDirectoryW;
+    inline decltype(&::CreateDirectoryA) CreateDirectoryA = ::CreateDirectoryA;
     inline CopyFile2Fn CopyFile2 = nullptr;      // set by Hooks::Install
     inline CreateFile2Fn CreateFile2 = nullptr;  // same
 }

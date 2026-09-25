@@ -1,8 +1,8 @@
-﻿cmake_minimum_required(VERSION 3.21)
+cmake_minimum_required(VERSION 3.21)
 
 # The project name becomes the DLL name: TempFileFramework.dll.
 # WARNING: include/TempFileAPI.h looks the DLL up by this name - changing it breaks consumers.
-project(TempFileFramework VERSION 1.0.0 LANGUAGES CXX)
+project(TempFileFramework VERSION 1.1.0 LANGUAGES CXX)
 
 # Optional automatic deploy: SKYRIM_FOLDER (no mod manager) or
 # SKYRIM_MODS_FOLDER (MO2/Vortex, goes to <mods>/TempFileFramework).
@@ -24,6 +24,7 @@ add_commonlibsse_plugin(${PROJECT_NAME} SOURCES
     src/Papyrus.cpp
     src/CallStack.cpp
     src/ArchiveBypass.cpp
+    src/SessionPaths.cpp
 )
 target_compile_features(${PROJECT_NAME} PRIVATE cxx_std_23)
 target_precompile_headers(${PROJECT_NAME} PRIVATE PCH.h)
@@ -84,6 +85,7 @@ if(DEFINED OUTPUT_FOLDER)
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${OUTPUT_FOLDER}/Scripts/Source"
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/Scripts/Source/TempFile.psc" "${OUTPUT_FOLDER}/Scripts/Source/TempFile.psc"
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/Scripts/TempFile.pex" "${OUTPUT_FOLDER}/Scripts/TempFile.pex"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/SKSE/Plugins/TempFileFramework.ini" "${DLL_FOLDER}/TempFileFramework.ini"
         VERBATIM
     )
 endif()

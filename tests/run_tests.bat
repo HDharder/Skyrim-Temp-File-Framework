@@ -13,7 +13,7 @@ for %%L in ("%INST%\lib\minhook*.lib") do set "MHLIB=%%~fL"
 
 cl /nologo /std:c++latest /EHsc /W4 /O2 /MT /DUNICODE /D_UNICODE /DWIN32_LEAN_AND_MEAN /DNOMINMAX ^
    /FI"%ROOT%\tests\TestPCH.h" /I"%ROOT%\include" /I"%ROOT%\src" /I"%INST%\include" ^
-   "%ROOT%\tests\test.cpp" "%ROOT%\src\Store.cpp" "%ROOT%\src\Hooks.cpp" "%MHLIB%" ^
+   "%ROOT%\tests\test.cpp" "%ROOT%\src\Store.cpp" "%ROOT%\src\Hooks.cpp" "%ROOT%\src\SessionPaths.cpp" "%MHLIB%" ^
    /Fo"%OUT%\\" /Fe"%OUT%\tff_test.exe" || exit /b 1
 
 "%OUT%\tff_test.exe"
