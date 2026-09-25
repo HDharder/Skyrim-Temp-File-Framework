@@ -187,7 +187,7 @@ triplet. With `SKYRIM_MODS_FOLDER` set, the build copies the output to
 `<mods>\TempFileFramework\SKSE\Plugins\`.
 
 `tools\package_release.ps1 -Version x.y.z` turns a Release build into the install-ready
-`dist\TempFileFramework-x.y.z.zip` (DLL + compiled script + script source). It ships no PDB,
+`dist\x.y.z\TempFileFramework-x.y.z.zip` (DLL + compiled script + script source). It ships no PDB,
 strips source paths that prebuilt libraries embed in the DLL, and refuses to package if anything
 tied to the build machine (project folder, user or computer name) is left in the files.
 

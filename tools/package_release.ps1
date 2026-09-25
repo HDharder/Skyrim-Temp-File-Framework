@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (c) 2026 HDharder - Temp File Framework
 # Builds the release archive from an existing Release build:
-#   dist\TempFileFramework-<version>.zip   (install-ready: drop into MO2/Vortex)
+#   dist\<version>\TempFileFramework-<version>.zip   (install-ready: drop into MO2/Vortex)
 #     SKSE\Plugins\TempFileFramework.dll
 #     Scripts\TempFile.pex
 #     Scripts\Source\TempFile.psc
@@ -17,7 +17,7 @@ $build = Join-Path $root 'build\release'
 $dll = Join-Path $build 'TempFileFramework.dll'
 if (-not (Test-Path $dll)) { throw "Build the release preset first: '$dll' is missing" }
 
-$dist = Join-Path $root 'dist'
+$dist = Join-Path (Join-Path $root 'dist') $Version  # one folder per version
 $stage = Join-Path $dist "TempFileFramework-$Version"
 if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 New-Item -ItemType Directory -Force (Join-Path $stage 'SKSE\Plugins'), (Join-Path $stage 'Scripts\Source') | Out-Null
