@@ -61,6 +61,17 @@ namespace Store {
             return out;
         }
 
+        // Paths inside our own session folder can outgrow MAX_PATH: its prefix is longer than the
+        // game's Data folder, and SkyrimSE.exe is not long-path aware, so a file the game can open
+        // under Data could not be created here. Every Win32 call on a physical temp path uses the
+        // extended-length form, which lifts the limit (Data paths are never touched by this).
+        std::wstring Win32Path(const std::wstring& a_path) {
+            if (a_path.starts_with(L"\\\\")) {
+                return a_path;  // already extended (\\?\) or UNC
+            }
+            return L"\\\\?\\" + a_path;
+        }
+
         std::string ToAnsi(std::wstring_view a_text) {
             if (a_text.empty()) {
                 return {};
@@ -155,7 +166,7 @@ namespace Store {
 
         void EnsureParentDirs(const std::wstring& a_path) {
             for (std::size_t pos = g_filesRoot.size(); (pos = a_path.find(L'\\', pos)) != std::wstring::npos; ++pos) {
-                CreateDirectoryW(a_path.substr(0, pos).c_str(), nullptr);
+                CreateDirectoryW(Win32Path(a_path.substr(0, pos)).c_str(), nullptr);
             }
         }
 
@@ -166,13 +177,13 @@ namespace Store {
         // The content is written through a separate, short-lived handle (WriteContent).
         HANDLE OpenAnchor(const std::wstring& a_real) {
             EnsureParentDirs(a_real);
-            return Real::CreateFileW(a_real.c_str(), DELETE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            return Real::CreateFileW(Win32Path(a_real).c_str(), DELETE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                                      nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE,
                                      nullptr);
         }
 
         bool WriteContent(const std::wstring& a_real, const void* a_data, std::size_t a_size) {
-            const HANDLE writer = Real::CreateFileW(a_real.c_str(), GENERIC_WRITE,
+            const HANDLE writer = Real::CreateFileW(Win32Path(a_real).c_str(), GENERIC_WRITE,
                                                     FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
                                                     OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
             if (writer == INVALID_HANDLE_VALUE) {
@@ -189,7 +200,7 @@ namespace Store {
         // file open, the deletion only happens once it closes it - and until then the path would
         // stay "busy", making an immediate Create fail. Moved to trash\, the path is free at once.
         void Retire(Entry& a_entry) {
-            const std::wstring target = g_trashDir + std::to_wstring(++g_trashCounter);
+            const std::wstring target = Win32Path(g_trashDir + std::to_wstring(++g_trashCounter));
             std::vector<std::byte> buffer(sizeof(FILE_RENAME_INFO) + target.size() * sizeof(wchar_t));
             auto* info = reinterpret_cast<FILE_RENAME_INFO*>(buffer.data());
             info->ReplaceIfExists = FALSE;
@@ -292,7 +303,7 @@ namespace Store {
 
         void RemoveTree(const std::wstring& a_dir) {
             WIN32_FIND_DATAW data{};
-            const HANDLE find = Real::FindFirstFileW((a_dir + L"*").c_str(), &data);
+            const HANDLE find = Real::FindFirstFileW((Win32Path(a_dir) + L"*").c_str(), &data);
             if (find != INVALID_HANDLE_VALUE) {
                 do {
                     const std::wstring_view name = data.cFileName;
@@ -302,18 +313,18 @@ namespace Store {
                     const std::wstring path = a_dir + data.cFileName;
                     if (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
                         if (data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) {
-                            RemoveDirectoryW(path.c_str());  // never follow a junction
+                            RemoveDirectoryW(Win32Path(path).c_str());  // never follow a junction
                         } else {
                             RemoveTree(path + L"\\");
                         }
                     } else {
-                        SetFileAttributesW(path.c_str(), FILE_ATTRIBUTE_NORMAL);
-                        Real::DeleteFileW(path.c_str());
+                        SetFileAttributesW(Win32Path(path).c_str(), FILE_ATTRIBUTE_NORMAL);
+                        Real::DeleteFileW(Win32Path(path).c_str());
                     }
                 } while (Real::FindNextFileW(find, &data));
                 Real::FindClose(find);
             }
-            RemoveDirectoryW(a_dir.c_str());
+            RemoveDirectoryW(Win32Path(a_dir).c_str());
         }
 
         bool IsSessionAlive(DWORD a_pid, std::uint64_t a_created) {
@@ -571,7 +582,7 @@ namespace Store {
             return {};
         }
         if (StartsWithCI(full, g_sessionDir)) {
-            return {Kind::TempArea, {}, {}};
+            return {Kind::TempArea, {}, Win32Path(full)};
         }
         std::wstring rel;
         if (!ToDataRel(full, rel) || rel.empty()) {
@@ -581,7 +592,7 @@ namespace Store {
 
         std::shared_lock lock(g_mapLock);
         if (const auto it = g_entries.find(key); it != g_entries.end()) {
-            return {Kind::File, std::move(rel), it->second.real};
+            return {Kind::File, std::move(rel), Win32Path(it->second.real)};
         }
         const auto under = [&](const std::wstring& a_candidate) {
             return a_candidate.size() > key.size() && a_candidate[key.size()] == L'\\' && a_candidate.starts_with(key);
@@ -590,7 +601,7 @@ namespace Store {
                                 std::ranges::any_of(g_entries, [&](const auto& a_entry) { return under(a_entry.first); }) ||
                                 std::ranges::any_of(g_sessionDirs, [&](const auto& a_dir) { return under(a_dir.first); });
         if (virtualDir) {
-            std::wstring real = g_filesRoot + rel;
+            std::wstring real = Win32Path(g_filesRoot + rel);
             return {Kind::VirtualDir, std::move(rel), std::move(real)};
         }
         return {};
@@ -642,7 +653,7 @@ namespace Store {
             if (!seen.insert(name).second) {
                 continue;
             }
-            std::wstring physical = isFile ? entry.real : g_filesRoot + FirstComponents(entry.display, depth + 1);
+            std::wstring physical = Win32Path(isFile ? entry.real : g_filesRoot + FirstComponents(entry.display, depth + 1));
             out.push_back({std::move(name), std::move(physical), isFile});
         }
         for (const auto& [key, display] : g_sessionDirs) {
@@ -654,7 +665,7 @@ namespace Store {
             if (!seen.insert(name).second) {
                 continue;
             }
-            out.push_back({std::move(name), g_filesRoot + FirstComponents(display, depth + 1), false});
+            out.push_back({std::move(name), Win32Path(g_filesRoot + FirstComponents(display, depth + 1)), false});
         }
         return out;
     }

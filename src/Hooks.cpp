@@ -284,7 +284,8 @@ namespace Hooks {
                                              a_template);
                 case Store::Kind::TempArea:
                     a_handled = true;
-                    return Real::CreateFileW(a_name, a_access, share, a_security, a_disposition, a_flags, a_template);
+                    return Real::CreateFileW(hit.real.c_str(), a_access, share, a_security, a_disposition, a_flags,
+                                             a_template);
                 case Store::Kind::VirtualDir: {
                     a_handled = true;
                     const HANDLE handle =
@@ -354,7 +355,7 @@ namespace Hooks {
                     case Store::Kind::File:
                         return Real::CreateFile2(hit.real.c_str(), a_access, share, a_disposition, a_params);
                     case Store::Kind::TempArea:
-                        return Real::CreateFile2(a_name, a_access, share, a_disposition, a_params);
+                        return Real::CreateFile2(hit.real.c_str(), a_access, share, a_disposition, a_params);
                     case Store::Kind::VirtualDir: {
                         const HANDLE handle = Real::CreateFile2(a_name, a_access, a_share, a_disposition, a_params);
                         if (handle == INVALID_HANDLE_VALUE && IsNotFound(GetLastError())) {

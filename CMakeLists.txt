@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.21)
 
 # The project name becomes the DLL name: TempFileFramework.dll.
 # WARNING: include/TempFileAPI.h looks the DLL up by this name - changing it breaks consumers.
-project(TempFileFramework VERSION 1.1.0 LANGUAGES CXX)
+project(TempFileFramework VERSION 1.1.1 LANGUAGES CXX)
 
 # Optional automatic deploy: SKYRIM_FOLDER (no mod manager) or
 # SKYRIM_MODS_FOLDER (MO2/Vortex, goes to <mods>/TempFileFramework).

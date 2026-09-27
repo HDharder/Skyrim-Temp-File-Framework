@@ -165,9 +165,9 @@ logs every file call whose path contains `filter`, at the Win32 and the ntdll la
 ## Out-of-game test
 
 `tests\run_tests.bat` builds the real `Store.cpp` + `Hooks.cpp` into a plain .exe (the .exe's
-folder plays the part of the game folder) and checks 96 cases: redirection through
+folder plays the part of the game folder) and checks 103 cases: redirection through
 `ifstream`/`ofstream`, `std::filesystem`, Win32 A/W, folder listings, "save to .tmp + rename",
-`copy_file`, `fs::remove`, deleting while the file is open, invalid paths, session-only paths, **CTD** and **exit**.
+`copy_file`, `fs::remove`, deleting while the file is open, invalid paths, session-only paths, paths over `MAX_PATH` in the temp folder, **CTD** and **exit**.
 In the CTD test a child process creates a temp file and is killed without running any of our
 code; the test checks that Windows deleted the file and that the next launch's sweep deletes the
 folder. In the exit test a child quits the way Skyrim does (`TerminateProcess` on itself) and the

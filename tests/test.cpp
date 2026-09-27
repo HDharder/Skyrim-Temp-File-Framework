@@ -354,6 +354,30 @@ int main(int argc, char** argv) {
         CHECK(missing == INVALID_HANDLE_VALUE && !Store::Exists(L"SKSE/Plugins/SessionMod/missing.txt"));
     }
 
+    std::printf("\n== long paths: fits under Data, over MAX_PATH under the temp folder ==\n");
+    {
+        // A Data-relative path sized so that Data\<rel> stays under MAX_PATH (what the game can
+        // open) while the temp folder copy - whose prefix is longer - goes over it.
+        const std::wstring dataPrefix = (data / "").wstring();
+        std::wstring rel = L"SKSE\\Plugins\\TFFTest\\long\\";
+        while (dataPrefix.size() + rel.size() + 20 < MAX_PATH - 1) {
+            rel += L"abcdefghij";
+        }
+        rel += L"\\deep_file.txt";
+        const fs::path dataPath = data / rel;
+        std::printf("      Data path %zu chars\n", dataPath.wstring().size());
+        CHECK(dataPath.wstring().size() < MAX_PATH);
+        CHECK(Store::Create(rel, "LONG", 4) == kTempFile_Ok);
+        const auto longReal = Store::GetRealPath(rel);
+        std::printf("      temp path %zu chars\n", longReal ? longReal->size() : 0);
+        CHECK(longReal && longReal->size() >= MAX_PATH);
+        CHECK(ReadStd(dataPath) == "LONG");
+        WriteStd(dataPath, "LONGER");
+        CHECK(ReadStd(dataPath) == "LONGER");
+        CHECK(Store::Delete(rel) == kTempFile_Ok);
+        CHECK(!fs::exists(dataPath));
+    }
+
     std::printf("\n== CTD: child creates a temp file and is killed with TerminateProcess ==\n");
     fs::remove(ExeDir() / "child_out.txt");
     CHECK(RunSelf(L"child") == 3);
