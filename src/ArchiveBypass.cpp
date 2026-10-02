@@ -3,26 +3,28 @@
 
 #include "ArchiveBypass.h"
 
-// Engine layout (runtime 1.6.1170; found by disassembling a memory dump of the decrypted exe and
-// by call stacks captured in game):
+// Engine layout (found by disassembling memory dumps of the decrypted executables; IDs are
+// Address Library IDs, SE / AE):
 //
-//   ID 69839  CreateStream(path, out, bool looseOnly, ...)
-//     +0x42   call PathToID(ID* out, const char* path)
-//     +0x62   call IndexGuard::IndexGuard(guard)      - takes the archive index lock, inits a search
-//     +0x115  call IndexGuard::~IndexGuard(guard)
-//   ID 69689  FindRecord(searchState, const ID*, Record** out) -> bool   (the model loader's lookup)
-//     +0x10   mov rcx, [ArchiveManager*]              - null until the archives are being loaded
-//   ID 69949  (archive registration, per archived file: loose copy? -> register it as loose)
-//     +0xCF   call RegisterLooseThunk -> +0x10 call RegisterLoose(guard, const ID*, Stream smart ptr*)
+//   68631 / 69971  PathToID(ID* out, const char* path)
+//   68321 / 69681  IndexGuard::IndexGuard(guard)   - takes the archive index lock, inits a search
+//   68322 / 69682  IndexGuard::~IndexGuard(guard)
+//   68329 / 69689  FindRecord(searchState, const ID*, Record** out) -> bool   (the model loader's lookup)
+//                  +0x10  mov rcx, [ArchiveManager*]   (523840 / 410404) - null until the archives load
+//   68327 / 69687  RegisterLoose(guard, const ID*, Stream smart ptr*)
+//   68483 / 69839  CreateStream (on SE the half that takes an ID); its inlined Stream::IncRef gives the
+//                  Stream reference count offset: +0x88 / +0xB8  lock cmpxchg [rbx + disp8], ecx
 //
 // RegisterLoose converts an archive record into a loose record in place (releasing its archive
-// reference and name), replaces the stream of a loose record, or inserts a new loose record.
+// reference and name), replaces the stream of a loose record, or inserts a new loose record. SE
+// splits it in two functions; the behaviour and the layouts below are the same.
 //
 // Record (0x28 bytes): ID at +0x00, +0x0C int32 (< 0: archive record, size | flags), +0x10 offset,
 // +0x18 name (BSFixedString), +0x20 archive object (archive record) or Stream* (loose record).
 //
-// Every address is decoded from the instructions above and the opcodes are verified; on any
-// mismatch nothing is used.
+// Stream reference count: +0x0C on SE and on AE up to at least 1.6.640, +0x10 on 1.6.1170 and
+// later. CommonLib's StreamBase assumes +0x10 on every AE runtime, so the framework never lets
+// CommonLib count Stream references - it uses the offset the running engine's own code uses.
 namespace ArchiveBypass {
     namespace {
         struct ID {
@@ -41,7 +43,8 @@ namespace ArchiveBypass {
             }
         };
 
-        using StreamPtr = RE::BSTSmartPointer<RE::BSResource::Stream>;
+        using Stream = RE::BSResource::Stream;
+        using StreamPtr = RE::BSTSmartPointer<Stream>;
         using PathToIDFn = ID* (*)(ID*, const char*);
         using GuardCtorFn = void* (*)(void*);
         using GuardDtorFn = void (*)(void*);
@@ -54,7 +57,37 @@ namespace ArchiveBypass {
         FindRecordFn g_findRecord = nullptr;
         RegisterLooseFn g_registerLoose = nullptr;
         void** g_manager = nullptr;
+        std::uint32_t g_streamRefCount = 0;  // offset of Stream's flags (reference count in the high 20 bits)
         bool g_active = false;
+
+        void ReleaseStream(Stream* a_stream) {
+            if (!a_stream) {
+                return;
+            }
+            auto* flags = reinterpret_cast<volatile long*>(reinterpret_cast<std::byte*>(a_stream) + g_streamRefCount);
+            const auto after = static_cast<std::uint32_t>(_InterlockedExchangeAdd(flags, -0x1000)) - 0x1000u;
+            if ((after & 0xFFFFF000u) == 0) {
+                // The scalar deleting destructor, called the way the engine calls it.
+                (*reinterpret_cast<void (***)(Stream*, std::uint32_t)>(a_stream))[0](a_stream, 1);
+            }
+        }
+
+        // An engine smart pointer that the engine fills (DoCreateStream) and copies (RegisterLoose).
+        // CommonLib's BSTSmartPointer destructor never runs on it: it would count at the wrong offset.
+        class StreamRef {
+        public:
+            StreamRef() = default;
+            ~StreamRef() { ReleaseStream(get()); }
+            StreamRef(const StreamRef&) = delete;
+            StreamRef& operator=(const StreamRef&) = delete;
+
+            StreamPtr& ptr() { return *reinterpret_cast<StreamPtr*>(_storage); }
+            Stream* get() const { return *reinterpret_cast<Stream* const*>(_storage); }
+
+        private:
+            alignas(StreamPtr) std::byte _storage[sizeof(StreamPtr)]{};
+        };
+        static_assert(sizeof(StreamPtr) == sizeof(void*));
 
         // The original archive record of each converted path, with the references it held.
         struct Snapshot {
@@ -83,13 +116,6 @@ namespace ArchiveBypass {
         private:
             alignas(16) std::array<std::byte, 0x200> _storage{};
         };
-
-        std::uintptr_t CallTarget(std::uintptr_t a_instruction) {
-            if (*reinterpret_cast<const std::uint8_t*>(a_instruction) != 0xE8) {
-                return 0;
-            }
-            return a_instruction + 5 + *reinterpret_cast<const std::int32_t*>(a_instruction + 1);
-        }
 
         // mov rcx, qword ptr [rip + disp32]  (48 8B 0D)
         std::uintptr_t RipLoadTarget(std::uintptr_t a_instruction) {
@@ -143,11 +169,11 @@ namespace ArchiveBypass {
             // The same call the game makes for every archived file while loading: a loose stream for
             // the Data path (which our file API hooks redirect to the temp file). GlobalLocations
             // works relative to the GAME folder - the game passes "data\MESHES\..." here.
-            StreamPtr stream;
+            StreamRef stream;
             RE::BSResource::Location* where = nullptr;
             const std::string locationPath = "data\\" + path;
-            const auto error = locations->DoCreateStream(locationPath.c_str(), stream, where, false);
-            if (error != RE::BSResource::ErrorCode::kNone || !stream) {
+            const auto error = locations->DoCreateStream(locationPath.c_str(), stream.ptr(), where, false);
+            if (error != RE::BSResource::ErrorCode::kNone || !stream.get()) {
                 logger::warn("Engine index: no loose stream for '{}' (error {})", path, static_cast<int>(error));
                 return;
             }
@@ -173,7 +199,7 @@ namespace ArchiveBypass {
                 snapshot.name = *reinterpret_cast<void**>(nameCopy);  // the copy's reference now lives here
                 g_converted.emplace(id, snapshot);
             }
-            g_registerLoose(guard.guard(), &id, &stream);
+            g_registerLoose(guard.guard(), &id, &stream.ptr());
             logger::info("Engine index: '{}' now resolves to its temp file ({})", path,
                          found ? "was a BSA record" : "new record");
         }
@@ -197,7 +223,7 @@ namespace ArchiveBypass {
                 return;
             }
             // Drop what the loose record owns (its name and its stream reference)...
-            auto* stream = *reinterpret_cast<RE::BSResource::Stream**>(record + 0x20);
+            auto* stream = *reinterpret_cast<Stream**>(record + 0x20);
             reinterpret_cast<RE::BSFixedString*>(record + 0x18)->~BSFixedString();
             // ...and hand the snapshot's references back to the archive record.
             const Snapshot& snapshot = it->second;
@@ -206,49 +232,44 @@ namespace ArchiveBypass {
             *reinterpret_cast<void**>(record + 0x20) = snapshot.archive;
             *reinterpret_cast<std::int32_t*>(record + 0x0C) = snapshot.sizeFlags;
             g_converted.erase(it);
-            if (stream && stream->DecRef() == 0) {
-                delete stream;
-            }
+            ReleaseStream(stream);
             logger::info("Engine index: '{}' resolves to its BSA copy again", path);
         }
     }
 
     bool Install() {
-        if (!REL::Module::IsAE()) {
-            logger::warn("Engine index: runtime not supported yet - BSA-only paths report ArchiveLocked");
+        if (REL::Module::IsVR()) {
+            logger::warn("Engine index: not supported on VR - BSA-only paths report ArchiveLocked");
             return false;
         }
-        // The IDs and instruction offsets below were verified on 1.6.x only. On 1.7.x the Address
-        // Library IDs may point elsewhere, and the byte checks alone are too weak to catch that.
-        if (REL::Module::get().version() >= REL::Version(1, 7, 0, 0)) {
-            logger::warn("Engine index: not verified on {} yet - BSA-only paths report ArchiveLocked",
-                         REL::Module::get().version().string("."));
-            return false;
-        }
+        const auto address = [](REL::RelocationID a_id) { return REL::Relocation<std::uintptr_t>(a_id).address(); };
         const std::uintptr_t base = REL::Module::get().base();
-        const std::uintptr_t createStream = REL::ID(69839).address();
-        const std::uintptr_t findRecord = REL::ID(69689).address();
-        const std::uintptr_t registration = REL::ID(69949).address();
+        const std::uintptr_t findRecord = address(RELOCATION_ID(68329, 69689));
+        const std::uintptr_t manager = address(RELOCATION_ID(523840, 410404));
 
-        const std::uintptr_t pathToID = CallTarget(createStream + 0x42);
-        const std::uintptr_t guardCtor = CallTarget(createStream + 0x62);
-        const std::uintptr_t guardDtor = CallTarget(createStream + 0x115);
-        const std::uintptr_t manager = RipLoadTarget(findRecord + 0x10);
-        const std::uintptr_t thunk = CallTarget(registration + 0xCF);
-        const std::uintptr_t registerLoose = thunk ? CallTarget(thunk + 0x10) : 0;
-        if (!pathToID || !guardCtor || !guardDtor || !manager || !registerLoose) {
-            logger::warn("Engine index: engine code does not match the expected layout - disabled");
+        // lock cmpxchg dword ptr [rbx + disp8], ecx  (F0 0F B1 4B disp8): Stream::IncRef, inlined
+        const auto* incRef = reinterpret_cast<const std::uint8_t*>(
+            REL::Relocation<std::uintptr_t>(RELOCATION_ID(68483, 69839), REL::VariantOffset(0x88, 0xB8, 0)).address());
+        const bool incRefOk = incRef[0] == 0xF0 && incRef[1] == 0x0F && incRef[2] == 0xB1 && incRef[3] == 0x4B &&
+                              (incRef[4] == 0x0C || incRef[4] == 0x10);
+
+        // The lookup must read the manager the ID names: guards against a mismatched Address Library.
+        if (RipLoadTarget(findRecord + 0x10) != manager || !incRefOk) {
+            logger::warn("Engine index: engine code does not match the expected layout - BSA-only paths report "
+                         "ArchiveLocked");
             return false;
         }
-        g_pathToID = reinterpret_cast<PathToIDFn>(pathToID);
-        g_guardCtor = reinterpret_cast<GuardCtorFn>(guardCtor);
-        g_guardDtor = reinterpret_cast<GuardDtorFn>(guardDtor);
+        g_streamRefCount = incRef[4];
+        g_pathToID = reinterpret_cast<PathToIDFn>(address(RELOCATION_ID(68631, 69971)));
+        g_guardCtor = reinterpret_cast<GuardCtorFn>(address(RELOCATION_ID(68321, 69681)));
+        g_guardDtor = reinterpret_cast<GuardDtorFn>(address(RELOCATION_ID(68322, 69682)));
         g_findRecord = reinterpret_cast<FindRecordFn>(findRecord);
-        g_registerLoose = reinterpret_cast<RegisterLooseFn>(registerLoose);
+        g_registerLoose = reinterpret_cast<RegisterLooseFn>(address(RELOCATION_ID(68327, 69687)));
         g_manager = reinterpret_cast<void**>(manager);
         g_active = true;
-        logger::info("Engine index support ready (RegisterLoose SkyrimSE+{:#x}, manager SkyrimSE+{:#x})",
-                     registerLoose - base, manager - base);
+        logger::info("Engine index support ready (RegisterLoose SkyrimSE+{:#x}, manager SkyrimSE+{:#x}, Stream "
+                     "reference count at +{:#x})",
+                     reinterpret_cast<std::uintptr_t>(g_registerLoose) - base, manager - base, g_streamRefCount);
         return true;
     }
 

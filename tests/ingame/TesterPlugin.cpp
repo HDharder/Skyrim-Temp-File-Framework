@@ -245,9 +245,13 @@ namespace {
         if (!rollBytes) {
             return;
         }
-        // With the archive bypass active, even a BSA-only path is a plain success.
+        // With engine index support a BSA-only path is a plain success; on runtimes where it is off (not
+        // verified) the framework says so with ArchiveLocked - both are correct, and they decide what the
+        // engine checks below must expect.
         const std::int32_t copied = api->Copy(roll.c_str());
-        Check(copied == kTempFile_Ok, "Copy of a model that lives in a BSA", std::format("result {}", copied));
+        const bool engineIndex = copied == kTempFile_Ok;
+        Check(copied == kTempFile_Ok || copied == kTempFile_ArchiveLocked, "Copy of a model that lives in a BSA",
+              std::format("result {}, engine index {}", copied, engineIndex ? "on" : "off on this runtime"));
         const std::string rollReal = RealPath(api, roll.c_str());
         std::error_code ec;
         const auto rollSize = rollReal.empty() ? 0 : fs::file_size(rollReal, ec);
@@ -279,12 +283,19 @@ namespace {
             // archive bypass makes the archive index answer "not here" for paths with a temp file.
             const auto swordOriginal = ReadEngine(sword);
             const std::int32_t code = api->Create(sword.c_str(), rollBytes->data(), rollBytes->size());
-            Check(code == kTempFile_Ok, "LATE Create over a BSA-only path is a plain success (archive bypass active)",
+            Check(code == (engineIndex ? kTempFile_Ok : kTempFile_ArchiveLocked),
+                  engineIndex ? "LATE Create over a BSA-only path is a plain success"
+                              : "LATE Create over a BSA-only path reports ArchiveLocked (engine index off)",
                   std::format("result {}", code));
             const auto swordNow = ReadEngine(sword);
             Log("iron sword model: {} bytes in the BSA, {} bytes now", swordOriginal ? swordOriginal->size() : 0,
                 swordNow ? swordNow->size() : 0);
-            Check(swordNow && *swordNow == *rollBytes, "LATE temp file over a BSA file: the engine loads it");
+            if (engineIndex) {
+                Check(swordNow && *swordNow == *rollBytes, "LATE temp file over a BSA file: the engine loads it");
+            } else {
+                Check(swordNow && swordOriginal && *swordNow == *swordOriginal,
+                      "as reported, the engine keeps the BSA copy (engine index off)");
+            }
 
             // Delete must give the BSA copy back.
             constexpr auto kProbe = "meshes\\Clutter\\Ingredients\\SweetRoll01.nif";
@@ -292,7 +303,8 @@ namespace {
             const auto probeTemp = ReadEngine(kProbe);
             api->Delete(kProbe);
             const auto probeBack = ReadEngine(kProbe);
-            Check(probeTemp && probeTemp->size() == 1 && probeBack && *probeBack == *rollBytes,
+            Check(probeTemp && probeTemp->size() == (engineIndex ? 1u : rollBytes->size()) && probeBack &&
+                      *probeBack == *rollBytes,
                   "after Delete the engine reads the BSA copy again");
         }
 

@@ -46,9 +46,9 @@
 //   startup - a BSA record becomes a loose record (restored when the temp file is deleted), a
 //   brand-new path gets a new record - so the engine loads the temp file even when it is created
 //   long after the game started, over a file that lives inside a BSA.
-//   This needs runtime 1.6.x (the engine code is verified at startup). On any other runtime a temp
-//   file over a BSA-only path returns kTempFile_ArchiveLocked instead: it exists for std/Win32
-//   access, but the engine keeps the BSA copy. Success checks should be `result >= 0`.
+//   This works on SE (1.5.97) and AE (1.6.x, 1.7.x). Where it cannot (VR, or engine code that does
+//   not match) a temp file over a BSA-only path returns kTempFile_ArchiveLocked instead: it exists
+//   for std/Win32 access, but the engine keeps the BSA copy. Success checks should be `result >= 0`.
 //   Resources the engine has ALREADY loaded stay in its caches: create/replace a temp file before
 //   the model or texture is first loaded.
 //

@@ -109,9 +109,11 @@ index lock:
 - a path that is already loose (e.g. a mod's loose file) needs nothing - its loose record opens
   the Data path, which the file API hooks redirect.
 
-The engine functions are found through Address Library IDs, and the instructions around them are
-checked at startup; on a runtime whose code does not match (currently anything but 1.6.x) this
-part turns itself off and a temp file over a BSA-only path returns `kTempFile_ArchiveLocked`.
+The engine functions are found through Address Library IDs (SE and AE), the way CommonLibSSE-NG
+finds its own, and a few instructions around them are checked at startup; if they do not match,
+this part turns itself off and a temp file over a BSA-only path returns `kTempFile_ArchiveLocked`.
+The one layout that differs between runtimes - where the engine's `Stream` keeps its reference
+count - is read from the running game's code.
 How the index works was worked out from call stacks captured in game and a disassembly of the
 running (decrypted) executable - the notes are in `src/ArchiveBypass.cpp`.
 
@@ -147,9 +149,10 @@ logs every file call whose path contains `filter`, at the Win32 and the ntdll la
 
 - **Engine cache**: once the game has loaded a `.nif`/`.dds`, changing the temp file does not
   reload what is already in memory. Create/copy it **before** the resource is loaded.
-- **Engine index support needs runtime 1.6.x** (tested on 1.6.1170). On other runtimes a temp
-  file over a BSA-only path returns `kTempFile_ArchiveLocked`: it exists for std/Win32 access, but
-  the engine keeps the BSA copy. Everything else works the same.
+- **Engine index support**: SE (1.5.97) and AE (1.6.x, 1.7.x), tested in game on 1.5.97, 1.6.640,
+  1.6.1170, 1.7.99 and 1.7.104. Not on VR. Where it cannot run, a temp file over a BSA-only path
+  returns `kTempFile_ArchiveLocked`: it exists for std/Win32 access, but the engine keeps the BSA
+  copy. Everything else works the same.
 - **Copy from a BSA** only works from `kDataLoaded` on (the archives must be loaded to read them).
 - A temp file created **before the archives load** (`kPostLoad`) over a BSA path is registered by
   the game itself as a loose file, so no BSA record is ever created for it: if it is deleted later,
@@ -203,8 +206,9 @@ tied to the build machine (project folder, user or computer name) is left in the
   are MIT licensed** (the license text is in each file), so any mod - open or closed source - can
   include the header or compile scripts against the framework. Using the framework through them
   does not put your mod under the GPL.
-- `TempFileFramework.dll` statically links CommonLibSSE-NG, MinHook, spdlog, {fmt}, Xbyak and
-  rapidcsv; their notices are in [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt) and ship with
+- `TempFileFramework.dll` statically links CommonLibSSE-NG (GPL-3.0-or-later with the Modding and
+  Linking exceptions), MinHook, spdlog, {fmt}, Xbyak, rapidcsv, DirectXTK, DirectXMath, nlohmann/json,
+  SimpleIni and toml11; their notices are in [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt) and ship with
   every release.
 
 Copyright (c) 2026 HDharder
