@@ -5,6 +5,7 @@
 
 #include "Hooks.h"
 #include "Store.h"
+#include "TextureReload.h"
 
 // The C bridge of the public API (include/TempFileAPI.h). No C++ crosses the DLL boundary:
 // UTF-8 `const char*` goes in, integers come out.
@@ -15,11 +16,15 @@ namespace {
         return a_path ? Store::Copy(Store::FromUtf8(a_path)) : kTempFile_InvalidPath;
     }
 
-    std::int32_t API_Create(const char* a_path, const void* a_data, std::uint64_t a_size) {
+    std::int32_t API_CreateEx(const char* a_path, const void* a_data, std::uint64_t a_size, std::uint32_t a_flags) {
         if (!a_path || a_size > (std::numeric_limits<std::size_t>::max)()) {
             return kTempFile_InvalidPath;
         }
-        return Store::Create(Store::FromUtf8(a_path), a_data, static_cast<std::size_t>(a_size));
+        return Store::Create(Store::FromUtf8(a_path), a_data, static_cast<std::size_t>(a_size), a_flags);
+    }
+
+    std::int32_t API_Create(const char* a_path, const void* a_data, std::uint64_t a_size) {
+        return API_CreateEx(a_path, a_data, a_size, 0);
     }
 
     std::int32_t API_Delete(const char* a_path) {
@@ -44,8 +49,15 @@ namespace {
         return needed;
     }
 
+    std::int32_t API_ReloadTexture(const char* a_path) {
+        return a_path ? TextureReload::Request(Store::FromUtf8(a_path)) : kTempFile_InvalidPath;
+    }
+
+    void* API_ReloadingTexture() { return TextureReload::ReloadingTexture(); }
+
     constexpr TempFileAPI g_api{
         kTempFileAPIVersion, &API_Copy, &API_Create, &API_Delete, &API_Exists, &API_GetRealPath,
+        &API_ReloadTexture, &API_ReloadingTexture, &API_CreateEx,
     };
 }
 
@@ -54,7 +66,8 @@ namespace Exports {
 }
 
 extern "C" __declspec(dllexport) const TempFileAPI* TempFile_GetAPI(std::uint32_t a_requestedVersion) {
-    // A consumer compiled against a NEWER header expects members we do not have.
+    // The request is the lowest version the caller needs (headers before 1.2.0 sent their own
+    // version, which comes to the same thing). Asking for more than we have gets nothing.
     if (!g_enabled || a_requestedVersion > kTempFileAPIVersion) {
         return nullptr;
     }

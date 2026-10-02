@@ -25,6 +25,10 @@ namespace ArchiveBypass {
     void OnCreated(std::wstring_view) {}
     void OnDeleted(std::wstring_view) {}
 }
+namespace TextureReload {
+    std::int32_t Request(std::wstring_view) { return 0; }
+    void Shutdown() {}
+}
 
 namespace {
     int g_failures = 0;
@@ -376,6 +380,29 @@ int main(int argc, char** argv) {
         CHECK(ReadStd(dataPath) == "LONGER");
         CHECK(Store::Delete(rel) == kTempFile_Ok);
         CHECK(!fs::exists(dataPath));
+    }
+
+    std::printf("\n== CreateEx flags: kTempFile_OnDisk drops the temporary attribute ==\n");
+    {
+        const auto attributes = [](const std::wstring& a_rel) {
+            const auto path = Store::GetRealPath(a_rel);
+            return path ? GetFileAttributesW((L"\\\\?\\" + *path).c_str()) : INVALID_FILE_ATTRIBUTES;
+        };
+        const std::wstring rel = L"SKSE/Plugins/TFFTest/big.bin";
+        CHECK(Store::Create(rel, "SMALL", 5) == kTempFile_Ok);
+        CHECK(attributes(rel) != INVALID_FILE_ATTRIBUTES && (attributes(rel) & FILE_ATTRIBUTE_TEMPORARY));
+        CHECK(Store::Create(rel, "BIGGER", 6, kTempFile_OnDisk | kTempFile_NoReload) == kTempFile_Ok);
+        CHECK(attributes(rel) != INVALID_FILE_ATTRIBUTES && !(attributes(rel) & FILE_ATTRIBUTE_TEMPORARY));
+        CHECK(ReadStd(data / rel) == "BIGGER");
+        CHECK(Store::Create(rel, "SMALL", 5) == kTempFile_Ok);  // a plain rewrite marks it temporary again
+        CHECK(attributes(rel) & FILE_ATTRIBUTE_TEMPORARY);
+        CHECK(Store::Delete(rel) == kTempFile_Ok);
+        const std::wstring fresh = L"SKSE/Plugins/TFFTest/big_fresh.bin";
+        CHECK(Store::Create(fresh, "ON DISK", 7, kTempFile_OnDisk) == kTempFile_Ok);
+        CHECK(attributes(fresh) != INVALID_FILE_ATTRIBUTES && !(attributes(fresh) & FILE_ATTRIBUTE_TEMPORARY));
+        CHECK(ReadStd(data / fresh) == "ON DISK");
+        CHECK(Store::Delete(fresh) == kTempFile_Ok);
+        CHECK(!fs::exists(data / fresh));
     }
 
     std::printf("\n== CTD: child creates a temp file and is killed with TerminateProcess ==\n");

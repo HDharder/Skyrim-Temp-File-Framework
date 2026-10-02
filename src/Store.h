@@ -49,7 +49,8 @@ namespace Store {
 
     // --- Operations (public API, Papyrus and the move/copy/delete hooks) ---
     Result Copy(std::wstring_view a_rel);
-    Result Create(std::wstring_view a_rel, const void* a_data, std::size_t a_size);
+    // `a_flags`: TempFileCreateFlags (kTempFile_NoReload, kTempFile_OnDisk).
+    Result Create(std::wstring_view a_rel, const void* a_data, std::size_t a_size, std::uint32_t a_flags = 0);
     Result Delete(std::wstring_view a_rel);
     bool Exists(std::wstring_view a_rel);
     std::optional<std::wstring> GetRealPath(std::wstring_view a_rel);

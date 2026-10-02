@@ -5,6 +5,7 @@
 
 #include "ArchiveBypass.h"
 #include "Real.h"
+#include "TextureReload.h"
 
 namespace Store {
     namespace {
@@ -175,20 +176,29 @@ namespace Store {
         // (what the game and the CRT normally use) would fail with a sharing violation, because
         // Windows requires the newcomer's share mode to allow the access of every open handle.
         // The content is written through a separate, short-lived handle (WriteContent).
-        HANDLE OpenAnchor(const std::wstring& a_real) {
-            EnsureParentDirs(a_real);
-            return Real::CreateFileW(Win32Path(a_real).c_str(), DELETE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                                     nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE,
-                                     nullptr);
+        // FILE_ATTRIBUTE_TEMPORARY asks Windows to keep the data in its file cache instead of writing
+        // it out, which is what small temp files want. Big ones (kTempFile_OnDisk) go to disk normally.
+        DWORD AttributesFor(std::uint32_t a_flags) {
+            return (a_flags & kTempFile_OnDisk) ? FILE_ATTRIBUTE_NORMAL : FILE_ATTRIBUTE_TEMPORARY;
         }
 
-        bool WriteContent(const std::wstring& a_real, const void* a_data, std::size_t a_size) {
+        HANDLE OpenAnchor(const std::wstring& a_real, std::uint32_t a_flags) {
+            EnsureParentDirs(a_real);
+            return Real::CreateFileW(Win32Path(a_real).c_str(), DELETE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                     nullptr, CREATE_ALWAYS, AttributesFor(a_flags) | FILE_FLAG_DELETE_ON_CLOSE, nullptr);
+        }
+
+        bool WriteContent(const std::wstring& a_real, const void* a_data, std::size_t a_size, std::uint32_t a_flags) {
             const HANDLE writer = Real::CreateFileW(Win32Path(a_real).c_str(), GENERIC_WRITE,
                                                     FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
                                                     OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
             if (writer == INVALID_HANDLE_VALUE) {
                 return false;
             }
+            // A rewrite may come with different flags than the first write, so the attribute follows.
+            FILE_BASIC_INFO basic{};
+            basic.FileAttributes = AttributesFor(a_flags);
+            Real::SetFileInformationByHandle(writer, FileBasicInfo, &basic, sizeof(basic));
             const bool ok = WriteAll(writer, a_data, a_size) && SetEndOfFile(writer);
             const DWORD error = GetLastError();
             CloseHandle(writer);
@@ -247,8 +257,10 @@ namespace Store {
 
         // `a_engine`: also make the game engine see it (resource index, BSA check). Off for session-only
         // files, which are created from inside the file API hooks where the engine is never called.
+        // `a_flags`: TempFileCreateFlags from CreateEx.
         Result CreateLocked(const std::wstring& a_key, const std::wstring& a_display, const void* a_data,
-                            std::size_t a_size, bool a_engine = true) {
+                            std::size_t a_size, bool a_engine = true, std::uint32_t a_flags = 0) {
+            const bool reload = a_engine && !(a_flags & kTempFile_NoReload);
             std::optional<std::wstring> existing;
             {
                 std::shared_lock lock(g_mapLock);
@@ -259,22 +271,25 @@ namespace Store {
 
             if (existing) {
                 // A failure here is usually the game (or another mod) holding the file without write sharing.
-                if (!WriteContent(*existing, a_data, a_size)) {
+                if (!WriteContent(*existing, a_data, a_size, a_flags)) {
                     logger::error("Rewrite of temp file '{}' failed (error {})", ToUtf8(a_display), GetLastError());
                     return kTempFile_IOError;
                 }
                 logger::info("Rewrote temp file '{}' ({} bytes)", ToUtf8(a_display), a_size);
+                if (reload) {
+                    TextureReload::Request(a_display);  // a texture already loaded from it follows the new content
+                }
                 return kTempFile_Ok;
             }
 
             const bool archiveLocked = a_engine && IsArchiveOnly(a_display);
             const std::wstring real = g_filesRoot + a_display;
-            const HANDLE anchor = OpenAnchor(real);
+            const HANDLE anchor = OpenAnchor(real, a_flags);
             if (anchor == INVALID_HANDLE_VALUE) {
                 logger::error("Could not create temp file '{}' (error {})", ToUtf8(real), GetLastError());
                 return kTempFile_IOError;
             }
-            if (!WriteContent(real, a_data, a_size)) {
+            if (!WriteContent(real, a_data, a_size, a_flags)) {
                 logger::error("Write of temp file '{}' failed (error {})", ToUtf8(real), GetLastError());
                 CloseHandle(anchor);
                 return kTempFile_IOError;
@@ -289,6 +304,9 @@ namespace Store {
             }
             if (a_engine) {
                 ArchiveBypass::OnCreated(a_display);
+            }
+            if (reload) {
+                TextureReload::Request(a_display);  // a texture already loaded from the original switches over
             }
             logger::info("Created {}temp file '{}' ({} bytes){}", a_engine ? "" : "session-only ", ToUtf8(a_display),
                          a_size, archiveLocked && ArchiveBypass::Active() ? ", overriding its BSA copy" : "");
@@ -555,6 +573,7 @@ namespace Store {
         if (!g_initialized || done.exchange(true)) {
             return;
         }
+        TextureReload::Shutdown();
         // Runs right before the process terminates itself, or in DLL_PROCESS_DETACH. If another
         // thread is holding the lock, do not insist: the kernel closes the anchors anyway and the
         // empty folder goes on the next launch.
@@ -747,13 +766,13 @@ namespace Store {
         return CreateLocked(key, *display, bytes.data(), bytes.size());
     }
 
-    Result Create(std::wstring_view a_rel, const void* a_data, std::size_t a_size) {
+    Result Create(std::wstring_view a_rel, const void* a_data, std::size_t a_size, std::uint32_t a_flags) {
         const auto display = Normalize(a_rel);
         if (!display || (!a_data && a_size != 0)) {
             return kTempFile_InvalidPath;
         }
         std::scoped_lock op(g_opLock);
-        return CreateLocked(Lower(*display), *display, a_data, a_size);
+        return CreateLocked(Lower(*display), *display, a_data, a_size, true, a_flags);
     }
 
     Result Delete(std::wstring_view a_rel) {
@@ -778,6 +797,7 @@ namespace Store {
         ArchiveBypass::OnDeleted(entry.display);
         Retire(entry);
         logger::info("Deleted temp file '{}'", ToUtf8(entry.display));
+        TextureReload::Request(entry.display);  // a texture loaded from the temp file goes back to the original
         return kTempFile_Ok;
     }
 

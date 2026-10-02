@@ -23,6 +23,17 @@ Game closes / CTD / process killed -> Windows deletes the temp files.
 | `Delete(path)` | Deletes the temp file; the original applies again. |
 | `Exists(path)` | Is there a temp file for this path? |
 | `GetRealPath(path, out, size)` | Physical path of the temp file (rarely needed, since writing to the normal Data path already reaches it). |
+| `CreateEx(path, data, size, flags)` *(API 2)* | `Create` with flags: `kTempFile_NoReload` (do not reload a texture already loaded from this path) and `kTempFile_OnDisk` (for big files: let Windows write the data to disk instead of keeping it in memory). |
+| `ReloadTexture(path)` *(API 2)* | Reloads every live texture the engine loaded from this `.dds` path, from whatever the path resolves to now. `Create`, `Copy` and `Delete` of a `.dds` already do it by themselves. |
+| `ReloadingTexture()` *(API 2)* | For plugins hooking `ID3D11Device::CreateTexture2D` (texture downscalers): the `NiSourceTexture*` being re-created on this thread during a reload, else null. |
+
+**Textures follow their temp file.** Creating, rewriting or deleting the temp file of a `.dds` the
+engine has already loaded reloads it in place. The file is read again through the engine's
+resource system on a background thread, a new D3D texture is created through the device's normal
+`CreateTexture2D` (so other plugins hooking it still decide the size), and on the main thread,
+between frames, the texture and view inside the engine's `NiSourceTexture` are swapped. Every
+object using that texture switches at once. Models (`.nif`) still need their temp file before they
+load.
 
 Paths: relative to `Data`, `/` or `\`, a leading `Data/` is optional, case-insensitive. `..` and
 absolute paths are rejected.
@@ -30,7 +41,9 @@ absolute paths are rejected.
 ## Using it from another SKSE plugin
 
 Copy [`include/TempFileAPI.h`](include/TempFileAPI.h) into your project. There is nothing to link,
-and if the framework is not installed, `GetAPI()` returns `nullptr`.
+and if the framework is not installed, `GetAPI()` returns `nullptr`. Ask for the lowest API version
+you need (`GetAPI()` asks for 1) and check `apiVersion` before using newer members, so your plugin
+also works with an older framework.
 
 ```cpp
 #include "TempFileAPI.h"
@@ -147,8 +160,14 @@ logs every file call whose path contains `filter`, at the Win32 and the ntdll la
 
 ## Known limitations
 
-- **Engine cache**: once the game has loaded a `.nif`/`.dds`, changing the temp file does not
-  reload what is already in memory. Create/copy it **before** the resource is loaded.
+- **Models stay cached**: once the game has loaded a `.nif`, changing its temp file does not
+  reload what is already in memory. Create or copy it **before** the model is loaded. Textures
+  (`.dds`) do reload in place (see [Operations](#operations)), except cube maps and texture arrays.
+- **Texture reloads run one after another** on a background thread, a few per second. A request is
+  not cancelled by a later one for the same path; the result is still right, because each reload
+  reads the file as it is at that moment, only the work is repeated.
+- **Texture reloading checks itself**: the first textures the engine loads must hold the D3D texture
+  it just created. If they do not, reloading turns itself off and textures keep their old content.
 - **Engine index support**: SE (1.5.97) and AE (1.6.x, 1.7.x), tested in game on 1.5.97, 1.6.640,
   1.6.1170, 1.7.99 and 1.7.104. Not on VR. Where it cannot run, a temp file over a BSA-only path
   returns `kTempFile_ArchiveLocked`: it exists for std/Win32 access, but the engine keeps the BSA
@@ -168,9 +187,9 @@ logs every file call whose path contains `filter`, at the Win32 and the ntdll la
 ## Out-of-game test
 
 `tests\run_tests.bat` builds the real `Store.cpp` + `Hooks.cpp` into a plain .exe (the .exe's
-folder plays the part of the game folder) and checks 103 cases: redirection through
+folder plays the part of the game folder) and checks 116 cases: redirection through
 `ifstream`/`ofstream`, `std::filesystem`, Win32 A/W, folder listings, "save to .tmp + rename",
-`copy_file`, `fs::remove`, deleting while the file is open, invalid paths, session-only paths, paths over `MAX_PATH` in the temp folder, **CTD** and **exit**.
+`copy_file`, `fs::remove`, deleting while the file is open, invalid paths, session-only paths, paths over `MAX_PATH` in the temp folder, `CreateEx` flags, **CTD** and **exit**.
 In the CTD test a child process creates a temp file and is killed without running any of our
 code; the test checks that Windows deleted the file and that the next launch's sweep deletes the
 folder. In the exit test a child quits the way Skyrim does (`TerminateProcess` on itself) and the
@@ -181,7 +200,9 @@ it runs on the first frame after `kDataLoaded` and checks the MO2 VFS, BSAs and 
 resource loader, writing `TempFileTester.log`. It also points four iron weapons at temp files that
 hold the sweet roll model (early and late, over BSA files and over brand-new paths), so the
 game's model loader can be checked by eye (`player.additem 0001397E 1`, `00012EB7`, `00013982`,
-`00013983`: all four must look like a sweet roll).
+`00013983`: all four must look like a sweet roll). Its last section loads a brand-new texture
+through the engine, rewrites it and checks that the live texture follows (and that
+`kTempFile_NoReload` leaves it alone).
 
 ## Build
 

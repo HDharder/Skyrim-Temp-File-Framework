@@ -9,7 +9,15 @@
 #include <MinHook.h>
 #include <winternl.h>
 
+#include <d3d11.h>
+
+#include <algorithm>
+#include <array>
 #include <atomic>
+#include <condition_variable>
+#include <format>
+#include <mutex>
+#include <thread>
 #include <shared_mutex>
 #include <unordered_map>
 #include <unordered_set>

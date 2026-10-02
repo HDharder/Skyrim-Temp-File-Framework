@@ -8,6 +8,12 @@
 
 #include <Windows.h>
 
+#include <d3d11.h>
+
+#include <chrono>
+#include <future>
+#include <thread>
+
 #include <spdlog/sinks/basic_file_sink.h>
 
 using namespace std::literals;

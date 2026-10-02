@@ -58,13 +58,14 @@ namespace {
         }
     }
 
-    void Check(bool a_ok, std::string_view a_what, std::string_view a_detail = {}) {
+    bool Check(bool a_ok, std::string_view a_what, std::string_view a_detail = {}) {
         (a_ok ? g_passed : g_failed)++;
         if (a_detail.empty()) {
             Log("[{}] {}", a_ok ? "PASS" : "FAIL", a_what);
         } else {
             Log("[{}] {}  ({})", a_ok ? "PASS" : "FAIL", a_what, a_detail);
         }
+        return a_ok;
     }
 
     fs::path GameDir() {
@@ -453,6 +454,126 @@ namespace {
         RunPapyrusStep(0);
     }
 
+    // -------------------------------------------------------------------------------------------
+    // 7. Texture reload (API 2): a texture the engine has already loaded follows its temp file.
+    //    Runs after the other sections, over a few seconds: every engine call is posted to the
+    //    main thread, and this thread only waits in between.
+    // -------------------------------------------------------------------------------------------
+    constexpr auto kReloadTexture = "textures\\TempFileTester\\reload.dds";
+    std::vector<RE::NiPointer<RE::NiTexture>> g_heldTextures;  // keeps them loaded
+
+    // An uncompressed 32-bit DDS of one solid color, one mip level.
+    std::vector<char> MakeDds(std::uint32_t a_size, std::uint32_t a_bgra) {
+        std::vector<char> out(4 + 124 + static_cast<std::size_t>(a_size) * a_size * 4);
+        auto put = [&](std::size_t a_offset, std::uint32_t a_value) { std::memcpy(out.data() + a_offset, &a_value, 4); };
+        put(0, 0x20534444);                   // "DDS "
+        put(4, 124);                          // header size
+        put(8, 0x100F);                       // caps, height, width, pitch, pixel format
+        put(12, a_size);                      // height
+        put(16, a_size);                      // width
+        put(20, a_size * 4);                  // pitch
+        put(4 + 72, 32);                      // pixel format size
+        put(4 + 76, 0x41);                    // RGB with alpha
+        put(4 + 84, 32);                      // bits per pixel
+        put(4 + 88, 0x00FF0000);              // red mask
+        put(4 + 92, 0x0000FF00);              // green mask
+        put(4 + 96, 0x000000FF);              // blue mask
+        put(4 + 100, 0xFF000000);             // alpha mask
+        put(4 + 104, 0x1000);                 // caps: texture
+        for (std::size_t i = 4 + 124; i < out.size(); i += 4) {
+            put(i, a_bgra);
+        }
+        return out;
+    }
+
+    template <class F>
+    auto OnMainThread(F&& a_work) {
+        auto task = std::make_shared<std::packaged_task<decltype(a_work())()>>(std::forward<F>(a_work));
+        auto result = task->get_future();
+        SKSE::GetTaskInterface()->AddTask([task] { (*task)(); });
+        return result.get();
+    }
+
+    RE::NiPointer<RE::NiTexture> LoadTexture(const char* a_path) {
+        RE::NiPointer<RE::NiTexture> texture;
+        RE::BSShaderManager::GetTexture(a_path, true, texture, false);
+        return texture;
+    }
+
+    // Width of the live D3D texture behind a loaded NiSourceTexture (its BSGraphics::Texture at
+    // +0x48 holds the ID3D11Texture2D first).
+    std::uint32_t LiveWidth(RE::NiTexture* a_texture) {
+        auto* renderer = a_texture ? *reinterpret_cast<ID3D11Texture2D***>(reinterpret_cast<std::byte*>(a_texture) + 0x48) : nullptr;
+        if (!renderer || !*renderer) {
+            return 0;
+        }
+        D3D11_TEXTURE2D_DESC desc{};
+        (*renderer)->GetDesc(&desc);
+        return desc.Width;
+    }
+
+    // Polls the live width on the main thread until it is `a_expected` or the time is up.
+    std::uint32_t WaitForWidth(RE::NiTexture* a_texture, std::uint32_t a_expected, std::chrono::milliseconds a_limit) {
+        const auto end = std::chrono::steady_clock::now() + a_limit;
+        std::uint32_t width = 0;
+        do {
+            width = OnMainThread([a_texture] { return LiveWidth(a_texture); });
+            if (width == a_expected) {
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        } while (std::chrono::steady_clock::now() < end);
+        return width;
+    }
+
+    void RunTextureTests(const TempFileAPI* a_api) {
+        Log("");
+        Log("-- 7. Texture reload (API 2) --");
+        if (!Check(a_api->apiVersion >= 2, "API version 2 or later", std::format("version {}", a_api->apiVersion))) {
+            return;
+        }
+        // Brand-new textures, loaded through the engine: they also let the framework check the
+        // engine's texture layout, which it does on the first few loads before it reloads anything.
+        for (int i = 0; i < 10; ++i) {
+            const auto path = std::format("textures\\TempFileTester\\warm{}.dds", i);
+            const auto dds = MakeDds(8, 0xFF808080);
+            a_api->Create(path.c_str(), dds.data(), dds.size());
+            OnMainThread([&] { g_heldTextures.push_back(LoadTexture(path.c_str())); });
+        }
+
+        const auto red = MakeDds(64, 0xFFFF0000);
+        Check(a_api->Create(kReloadTexture, red.data(), red.size()) == kTempFile_Ok, "Create a brand-new texture");
+        RE::NiPointer<RE::NiTexture> texture = OnMainThread([] { return LoadTexture(kReloadTexture); });
+        g_heldTextures.push_back(texture);
+        const auto first = OnMainThread([&] { return LiveWidth(texture.get()); });
+        if (!Check(texture && first == 64, "the engine loads it", std::format("live width {}", first))) {
+            return;
+        }
+
+        const auto green = MakeDds(128, 0xFF00FF00);
+        Check(a_api->Create(kReloadTexture, green.data(), green.size()) == kTempFile_Ok, "rewrite it at 128x128");
+        auto width = WaitForWidth(texture.get(), 128, std::chrono::seconds(5));
+        Check(width == 128, "the live texture follows the rewrite", std::format("live width {}", width));
+
+        const auto blue = MakeDds(32, 0xFF0000FF);
+        Check(a_api->CreateEx(kReloadTexture, blue.data(), blue.size(), kTempFile_NoReload) == kTempFile_Ok,
+              "CreateEx with kTempFile_NoReload at 32x32");
+        std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+        width = OnMainThread([&] { return LiveWidth(texture.get()); });
+        Check(width == 128, "with kTempFile_NoReload the live texture is left alone", std::format("live width {}", width));
+
+        const auto queued = a_api->ReloadTexture(kReloadTexture);
+        Check(queued >= 1, "ReloadTexture finds the live texture", std::format("{} queued", queued));
+        width = WaitForWidth(texture.get(), 32, std::chrono::seconds(5));
+        Check(width == 32, "ReloadTexture picks up the new content", std::format("live width {}", width));
+
+        Check(a_api->CreateEx("SKSE/Plugins/TempFileTester/on_disk.bin", red.data(), red.size(), kTempFile_OnDisk) ==
+                  kTempFile_Ok,
+              "CreateEx with kTempFile_OnDisk");
+        Check(ReadText(GameDir() / "Data/SKSE/Plugins/TempFileTester/on_disk.bin").size() == red.size(),
+              "the kTempFile_OnDisk file reads back through Data");
+    }
+
     void Notify() {
         const auto text = std::format("TempFileTester: {} passed, {} failed", g_passed, g_failed);
         RE::SendHUDMessage::ShowHUDMessage(text.c_str());
@@ -477,6 +598,14 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse) {
                     if (!g_ran) {
                         g_ran = true;
                         RunTests();
+                        // Waits on the main thread between steps, so it runs on its own thread.
+                        if (const auto* api = TempFile::GetAPI()) {
+                            std::thread([api] {
+                                RunTextureTests(api);
+                                Log("");
+                                Log("RESULT (with textures): {} passed, {} failed", g_passed, g_failed);
+                            }).detach();
+                        }
                         // Queued in the Papyrus VM: the calls run as soon as it processes them.
                         if (!g_papyrusRan) {
                             g_papyrusRan = true;

@@ -49,8 +49,13 @@
 //   This works on SE (1.5.97) and AE (1.6.x, 1.7.x). Where it cannot (VR, or engine code that does
 //   not match) a temp file over a BSA-only path returns kTempFile_ArchiveLocked instead: it exists
 //   for std/Win32 access, but the engine keeps the BSA copy. Success checks should be `result >= 0`.
-//   Resources the engine has ALREADY loaded stay in its caches: create/replace a temp file before
-//   the model or texture is first loaded.
+//
+// TEXTURES FOLLOW THEIR TEMP FILE (apiVersion >= 2)
+//   A .dds the engine has already loaded is reloaded in place when its temp file is created,
+//   rewritten or deleted: every object using it switches at once, a few frames later. Pass
+//   kTempFile_NoReload to CreateEx when you know the live texture already matches the new file.
+//   MODELS (.nif) and other resources the engine has ALREADY loaded stay in its caches: create or
+//   replace those temp files before the model is first loaded.
 //
 // PATHS
 //   Relative to Data, UTF-8, '/' or '\' both accepted, a leading "Data/" is optional and
@@ -62,6 +67,11 @@
 //   ("Data/SKSE/Plugins/MyMod/config.json") with any API and it lands in the temp file. Or call
 //   Create again, which replaces the whole content.
 //
+// VERSIONS
+//   Ask GetAPI for the LOWEST version you need, then check `apiVersion` before using a member added
+//   later. A plugin that only needs version 1 still works with an older framework that way, and
+//   uses the newer members when they are there.
+//
 // ABI RULES: plain C only (no C++ types cross the DLL boundary), and TempFileAPI is APPEND-ONLY.
 // New members go at the end; check `apiVersion >= N` before using a member added in version N.
 #pragma once
@@ -70,7 +80,7 @@
 
 extern "C" {
 
-constexpr std::uint32_t kTempFileAPIVersion = 1;
+constexpr std::uint32_t kTempFileAPIVersion = 2;
 
 enum TempFileResult : std::int32_t {
     kTempFile_Ok = 0,             // done
@@ -81,6 +91,14 @@ enum TempFileResult : std::int32_t {
     kTempFile_InvalidPath = -1,   // empty, absolute, contains "..", or invalid characters
     kTempFile_NotFound = -2,      // Copy: the original exists nowhere (loose or BSA). Delete: no temp file
     kTempFile_IOError = -3,       // could not create/write the temp file (see TempFileFramework.log)
+};
+
+// CreateEx flags (apiVersion >= 2). Combine with |.
+enum TempFileCreateFlags : std::uint32_t {
+    kTempFile_NoReload = 1 << 0,  // do not reload a .dds the engine has already loaded from this path
+    kTempFile_OnDisk = 1 << 1,    // big files: let Windows write the data to disk instead of keeping it
+                                  // in memory (temp files are normally marked "temporary", which keeps
+                                  // them in the file cache as long as there is room)
 };
 
 struct TempFileAPI {
@@ -108,6 +126,24 @@ struct TempFileAPI {
     // file. If the return value is > outSize nothing was written, so call again with a bigger
     // buffer. You rarely need this: writing to the normal Data path already reaches the file.
     std::uint32_t (*GetRealPath)(const char* path, char* out, std::uint32_t outSize);
+
+    // ---- apiVersion >= 2 ----------------------------------------------------------------------
+
+    // Reloads every live texture the engine loaded from this .dds path, from whatever the path
+    // resolves to now (temp file or original). Create, Copy and Delete of a .dds already do this by
+    // themselves; call it when the content changed some other way. Asynchronous: the file is read
+    // on a background thread and the texture is swapped on the main thread a few frames later.
+    // Returns how many live textures were queued (0: not loaded right now, or not a .dds).
+    std::int32_t (*ReloadTexture)(const char* path);
+
+    // While the framework re-creates a texture, its ID3D11Device::CreateTexture2D call goes through
+    // the device's normal vtable, so plugins hooking it (texture downscalers...) still apply. Called
+    // from inside such a hook, this returns the RE::NiSourceTexture* being reloaded on this thread
+    // (to find its file name the same way as during a normal engine load), else nullptr.
+    void* (*ReloadingTexture)();
+
+    // Create with TempFileCreateFlags. CreateEx(path, data, size, 0) is the same as Create.
+    std::int32_t (*CreateEx)(const char* path, const void* data, std::uint64_t size, std::uint32_t flags);
 };
 
 }  // extern "C"
@@ -119,15 +155,16 @@ struct TempFileAPI {
 
 namespace TempFile {
     // Call it from kPostLoad onwards (all SKSE plugins are loaded by then). Returns nullptr if the
-    // framework is not installed or is older than this header.
-    inline const TempFileAPI* GetAPI() {
+    // framework is not installed or older than `minVersion`. Check `apiVersion` before using members
+    // newer than the version you asked for.
+    inline const TempFileAPI* GetAPI(std::uint32_t minVersion = 1) {
         const HMODULE module = GetModuleHandleW(L"TempFileFramework.dll");
         if (!module) {
             return nullptr;
         }
         using GetAPIFn = const TempFileAPI* (*)(std::uint32_t);
         const auto getAPI = reinterpret_cast<GetAPIFn>(GetProcAddress(module, "TempFile_GetAPI"));
-        return getAPI ? getAPI(kTempFileAPIVersion) : nullptr;
+        return getAPI ? getAPI(minVersion) : nullptr;
     }
 }
 #endif

@@ -8,6 +8,7 @@
 #include "Papyrus.h"
 #include "SessionPaths.h"
 #include "Store.h"
+#include "TextureReload.h"
 
 namespace {
     // Opened BEFORE the hooks: the log file never goes through our redirection.
@@ -61,6 +62,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse) {
         if (a_message->type == SKSE::MessagingInterface::kDataLoaded) {
             Store::SetArchivesReady();
             ArchiveBypass::OnArchivesReady();
+            TextureReload::Install();  // optional: without it, textures already loaded keep their old content
         }
     });
 
