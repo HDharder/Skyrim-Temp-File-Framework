@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Copyright (c) 2026 HDharder - Temp File Framework, https://github.com/HDharder/Skyrim-Temp-File-Framework
+// Copyright (c) 2026 HDharder, Temp File Framework, https://github.com/HDharder/Skyrim-Temp-File-Framework
 
 #include "ArchiveBypass.h"
 
@@ -10,7 +10,7 @@
 //   68321 / 69681  IndexGuard::IndexGuard(guard)   - takes the archive index lock, inits a search
 //   68322 / 69682  IndexGuard::~IndexGuard(guard)
 //   68329 / 69689  FindRecord(searchState, const ID*, Record** out) -> bool   (the model loader's lookup)
-//                  +0x10  mov rcx, [ArchiveManager*]   (523840 / 410404) - null until the archives load
+//                  +0x10  mov rcx, [ArchiveManager*]   (523840 / 410404), null until the archives load
 //   68327 / 69687  RegisterLoose(guard, const ID*, Stream smart ptr*)
 //   68483 / 69839  CreateStream (on SE the half that takes an ID); its inlined Stream::IncRef gives the
 //                  Stream reference count offset: +0x88 / +0xB8  lock cmpxchg [rbx + disp8], ecx
@@ -24,7 +24,7 @@
 //
 // Stream reference count: +0x0C on SE and on AE up to at least 1.6.640, +0x10 on 1.6.1170 and
 // later. CommonLib's StreamBase assumes +0x10 on every AE runtime, so the framework never lets
-// CommonLib count Stream references - it uses the offset the running engine's own code uses.
+// CommonLib count Stream references. It uses the offset the running engine's own code uses.
 namespace ArchiveBypass {
     namespace {
         struct ID {
@@ -168,7 +168,7 @@ namespace ArchiveBypass {
 
             // The same call the game makes for every archived file while loading: a loose stream for
             // the Data path (which our file API hooks redirect to the temp file). GlobalLocations
-            // works relative to the GAME folder - the game passes "data\MESHES\..." here.
+            // works relative to the GAME folder, so the game passes "data\MESHES\..." here.
             StreamRef stream;
             RE::BSResource::Location* where = nullptr;
             const std::string locationPath = "data\\" + path;
@@ -186,7 +186,7 @@ namespace ArchiveBypass {
                 return;  // already a loose record (e.g. a mod's loose file): the redirection does the rest
             }
             if (found && !g_converted.contains(id)) {
-                // Keep the archive record's data - and the references RegisterLoose is about to drop.
+                // Keep the archive record's data, and the references RegisterLoose is about to drop.
                 Snapshot snapshot{};
                 snapshot.sizeFlags = *reinterpret_cast<std::int32_t*>(record + 0x0C);
                 snapshot.offset = *reinterpret_cast<std::uint32_t*>(record + 0x10);
@@ -239,7 +239,7 @@ namespace ArchiveBypass {
 
     bool Install() {
         if (REL::Module::IsVR()) {
-            logger::warn("Engine index: not supported on VR - BSA-only paths report ArchiveLocked");
+            logger::warn("Engine index: not supported on VR, BSA-only paths report ArchiveLocked");
             return false;
         }
         const auto address = [](REL::RelocationID a_id) { return REL::Relocation<std::uintptr_t>(a_id).address(); };
@@ -255,7 +255,7 @@ namespace ArchiveBypass {
 
         // The lookup must read the manager the ID names: guards against a mismatched Address Library.
         if (RipLoadTarget(findRecord + 0x10) != manager || !incRefOk) {
-            logger::warn("Engine index: engine code does not match the expected layout - BSA-only paths report "
+            logger::warn("Engine index: engine code does not match the expected layout, BSA-only paths report "
                          "ArchiveLocked");
             return false;
         }

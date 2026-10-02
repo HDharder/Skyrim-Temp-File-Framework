@@ -22,15 +22,15 @@ Game closes / CTD / process killed -> Windows deletes the temp files.
 | `Create(path, data, size)` | Creates the temp file with this content, or **replaces** the content of the existing one. The original does not need to exist (brand-new files, e.g. a `.nif`). The engine sees it at any time, even over a file inside a BSA (see [How it works](#how-it-works)). |
 | `Delete(path)` | Deletes the temp file; the original applies again. |
 | `Exists(path)` | Is there a temp file for this path? |
-| `GetRealPath(path, out, size)` | Physical path of the temp file (rarely needed - writing to the normal Data path already reaches it). |
+| `GetRealPath(path, out, size)` | Physical path of the temp file (rarely needed, since writing to the normal Data path already reaches it). |
 
 Paths: relative to `Data`, `/` or `\`, a leading `Data/` is optional, case-insensitive. `..` and
 absolute paths are rejected.
 
 ## Using it from another SKSE plugin
 
-Copy [`include/TempFileAPI.h`](include/TempFileAPI.h) into your project. Nothing to link - if the
-framework is not installed, `GetAPI()` returns `nullptr`.
+Copy [`include/TempFileAPI.h`](include/TempFileAPI.h) into your project. There is nothing to link,
+and if the framework is not installed, `GetAPI()` returns `nullptr`.
 
 ```cpp
 #include "TempFileAPI.h"
@@ -64,8 +64,8 @@ TempFile.Delete("SKSE/Plugins/MyMod/state.txt")
 
 Optional, **off by default**. Paths listed here never get written to disk: when any mod writes to
 a matching path, the file becomes a session-only temp file first, so nothing lands in `Data` or in
-MO2's `overwrite` folder, and it is gone when the game closes. This works for **any** mod - it does
-not need to know about the framework.
+MO2's `overwrite` folder, and it is gone when the game closes. This works for **any** mod, and the
+mod does not need to know about the framework.
 
 `Data\SKSE\Plugins\TempFileFramework.ini`:
 
@@ -81,23 +81,23 @@ SKSE/Plugins/*.log
   `[SessionOnly]` section in `Data\SKSE\Plugins\TempFileFramework\SessionOnly\`.
 - Writing an existing file starts from its current content (appending works), and the file on disk
   keeps its original content. Folders created under these paths only exist in the session too.
-- **Only list files that are safe to lose every session** - caches, logs, data rebuilt at
+- **Only list files that are safe to lose every session**: caches, logs, data rebuilt at
   startup. Settings and saves (MCM settings, PapyrusUtil/JContainers data, RaceMenu presets...)
   would be wiped every time the game closes.
 - It prevents new clutter; it does not repair an `overwrite` folder that is already broken.
 
 ## How it works
 
-**Redirection** - hooks (MinHook) on the Windows file API in `kernelbase`, which cover the whole
+**Redirection.** Hooks (MinHook) on the Windows file API in `kernelbase`, which cover the whole
 process: `CreateFile`, `CreateFile2` (MSVC's `std::filesystem` opens files through it),
 `GetFileAttributes(Ex)`, `FindFirstFile(Ex)`/`FindNextFile`/`FindClose` (with merged listings: a
 file that only exists as a temp file shows up when listing its folder), `DeleteFile`,
 `MoveFileEx`, `ReplaceFile`, `CopyFile(Ex)`, `CopyFile2` and `SetFileInformationByHandle`
-(delete/rename through a handle - that is how `std::filesystem::remove` deletes). A and W versions.
+(delete/rename through a handle, which is how `std::filesystem::remove` deletes). A and W versions.
 
-**The engine's resource index** - redirecting file access is not enough for the game itself.
+**The engine's resource index.** Redirecting file access is not enough for the game itself.
 While loading the archives, the engine builds an index of every resource (file ID -> archive
-record or loose-file record), and its model loader resolves paths **only** through that index -
+record or loose-file record), and its model loader resolves paths **only** through that index,
 never through the disk. A path that was in a BSA at startup stays a BSA path, and a path that did
 not exist at startup is never found. So, for every temp file, the framework updates that index at
 runtime exactly the way the game does at startup, with the game's own functions and under the
@@ -106,42 +106,42 @@ index lock:
 - a **BSA record** is converted into a **loose record**; deleting the temp file puts the original
   BSA record back;
 - a **brand-new path** gets a new loose record;
-- a path that is already loose (e.g. a mod's loose file) needs nothing - its loose record opens
-  the Data path, which the file API hooks redirect.
+- a path that is already loose (e.g. a mod's loose file) needs nothing, because its loose record
+  opens the Data path, which the file API hooks redirect.
 
 The engine functions are found through Address Library IDs (SE and AE), the way CommonLibSSE-NG
 finds its own, and a few instructions around them are checked at startup; if they do not match,
 this part turns itself off and a temp file over a BSA-only path returns `kTempFile_ArchiveLocked`.
-The one layout that differs between runtimes - where the engine's `Stream` keeps its reference
-count - is read from the running game's code.
+The one layout that differs between runtimes, where the engine's `Stream` keeps its reference
+count, is read from the running game's code.
 How the index works was worked out from call stacks captured in game and a disassembly of the
-running (decrypted) executable - the notes are in `src/ArchiveBypass.cpp`.
+running (decrypted) executable. The notes are in `src/ArchiveBypass.cpp`.
 
-**Coexisting with MO2** - our hook sits in front of usvfs. We redirect the `Data` path to
+**Coexisting with MO2.** Our hook sits in front of usvfs. We redirect the `Data` path to
 `%TEMP%`, and usvfs lets it through because it is not a `Data` path. To read the original, the
 framework calls the original function, which still goes through usvfs, so it sees exactly the
 file the VFS shows. Vortex and manual installs work the same way (no usvfs in between).
 
-**Protecting the original** - temp files live **outside** the game folder, so they never compete
+**Protecting the original.** Temp files live **outside** the game folder, so they never compete
 with mod files in the VFS. Deleting, moving or copying over a path that has a temp file touches
 the temp file, never the original. That includes the "write `x.tmp` and rename it over `x.json`"
 pattern.
 
 **Cleanup (3 layers)**
-1. **CTD / process killed** - the framework keeps every temp file open with
+1. **CTD / process killed.** The framework keeps every temp file open with
    `FILE_FLAG_DELETE_ON_CLOSE`. When the process dies, however it dies, the **kernel** closes the
    handle and deletes the file. This does not depend on a crash handler: it works even on stack
    overflow or "End task", cases where a CrashLogger-style handler never runs.
-2. **Normal exit** - Skyrim quits by calling `TerminateProcess` on itself (DLLs never get
+2. **Normal exit.** Skyrim quits by calling `TerminateProcess` on itself (DLLs never get
    `DLL_PROCESS_DETACH`), so the framework hooks that call and deletes the session folder right
    before the process ends. `DLL_PROCESS_DETACH` covers any other way out.
-3. **Game startup** - deletes the folders of sessions whose process no longer exists. Each
+3. **Game startup.** The framework deletes the folders of sessions whose process no longer exists. Each
    session is named `<pid>-<creation time>`, so a reused PID or two Skyrims running at once
    never get mixed up.
 
 Log: `Documents\My Games\Skyrim Special Edition\SKSE\TempFileFramework.log`.
 
-**Diagnostics** - `TempFile_DebugTrace(const char* filter)` (exported, not part of `TempFileAPI`)
+**Diagnostics.** `TempFile_DebugTrace(const char* filter)` (exported, not part of `TempFileAPI`)
 logs every file call whose path contains `filter`, at the Win32 and the ntdll layer, to that log.
 `nullptr` or `""` turns it off. The ntdll hooks are only installed the first time it is used.
 
@@ -179,7 +179,7 @@ whole session folder must be gone.
 `tests\ingame\` is the in-game counterpart (`TempFileTester.dll`, built alongside, never shipped):
 it runs on the first frame after `kDataLoaded` and checks the MO2 VFS, BSAs and the engine's own
 resource loader, writing `TempFileTester.log`. It also points four iron weapons at temp files that
-hold the sweet roll model - early and late, over BSA files and over brand-new paths - so the
+hold the sweet roll model (early and late, over BSA files and over brand-new paths), so the
 game's model loader can be checked by eye (`player.additem 0001397E 1`, `00012EB7`, `00013982`,
 `00013983`: all four must look like a sweet roll).
 
@@ -187,7 +187,7 @@ game's model loader can be checked by eye (`player.additem 0001397E 1`, `00012EB
 
 CMake + vcpkg, `debug`/`release` presets, `x64-windows-static` triplet. CommonLibSSE-NG is the
 [alandtse fork](https://github.com/alandtse/CommonLibSSE-NG) (covers 1.5.97, 1.6.x and 1.7.x), a git
-submodule in `extern/CommonLibSSE-NG` pinned to a release tag - clone with `--recursive`, or run
+submodule in `extern/CommonLibSSE-NG` pinned to a release tag. Clone with `--recursive`, or run
 `git submodule update --init --recursive`. It is built from source with the plugin (its prebuilt
 bundle needs the dynamic CRT); vcpkg supplies its dependencies and MinHook. With `SKYRIM_MODS_FOLDER` set, the build copies the output to
 `<mods>\TempFileFramework\SKSE\Plugins\`.
@@ -200,10 +200,10 @@ tied to the build machine (project folder, user or computer name) is left in the
 ## License
 
 - The framework (`src/`, `Scripts/TempFile.pex`, `tools/`, `tests/`) is licensed under the
-  **GNU General Public License v3.0** - see [LICENSE](LICENSE). Modified versions and forks must
+  **GNU General Public License v3.0** (see [LICENSE](LICENSE)). Modified versions and forks must
   keep the copyright notice and stay GPL-3.0, with their source code available.
 - **[`include/TempFileAPI.h`](include/TempFileAPI.h) and [`Scripts/Source/TempFile.psc`](Scripts/Source/TempFile.psc)
-  are MIT licensed** (the license text is in each file), so any mod - open or closed source - can
+  are MIT licensed** (the license text is in each file), so any mod, open or closed source, can
   include the header or compile scripts against the framework. Using the framework through them
   does not put your mod under the GPL.
 - `TempFileFramework.dll` statically links CommonLibSSE-NG (GPL-3.0-or-later with the Modding and

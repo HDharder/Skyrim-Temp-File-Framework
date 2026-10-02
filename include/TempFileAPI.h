@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 //
-// TempFileAPI.h - public API of the Temp File Framework (TempFileFramework.dll).
+// TempFileAPI.h: public API of the Temp File Framework (TempFileFramework.dll).
 //
 // Copyright (c) 2026 HDharder
 //
-// This header - and only this header - is MIT licensed so any mod, open or closed source, can use
+// This header, and only this header, is MIT licensed so any mod, open or closed source, can use
 // the framework. The framework itself is GPL-3.0: https://github.com/HDharder/Skyrim-Temp-File-Framework
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy of this software
@@ -34,8 +34,8 @@
 //   SKSE plugin...) is redirected to a private copy that lives OUTSIDE the game folder:
 //       %TEMP%\SkyrimTempFiles\<session>\files\<path>
 //   The original file (loose, in a mod folder, in the MO2 VFS or in a BSA) is never touched.
-//   Deleting the temp file makes the original visible again. When the game exits - normally,
-//   by CTD or killed from Task Manager - Windows itself deletes every temp file (the framework
+//   Deleting the temp file makes the original visible again. When the game exits (normally,
+//   by CTD or killed from Task Manager), Windows itself deletes every temp file (the framework
 //   keeps them open with FILE_FLAG_DELETE_ON_CLOSE), and leftover folders are swept on the
 //   next launch.
 //
@@ -43,8 +43,8 @@
 //   The engine resolves every resource (meshes, textures...) through an index it builds while
 //   loading the archives, and its model loader never looks at the disk for a path the index does
 //   not know. For each temp file the framework updates that index the way the game itself does at
-//   startup - a BSA record becomes a loose record (restored when the temp file is deleted), a
-//   brand-new path gets a new record - so the engine loads the temp file even when it is created
+//   startup: a BSA record becomes a loose record (restored when the temp file is deleted) and a
+//   brand-new path gets a new record. So the engine loads the temp file even when it is created
 //   long after the game started, over a file that lives inside a BSA.
 //   This works on SE (1.5.97) and AE (1.6.x, 1.7.x). Where it cannot (VR, or engine code that does
 //   not match) a temp file over a BSA-only path returns kTempFile_ArchiveLocked instead: it exists
@@ -59,7 +59,7 @@
 //
 // WRITING TO A TEMP FILE
 //   Once Copy/Create returned success you can simply write to the NORMAL Data path
-//   ("Data/SKSE/Plugins/MyMod/config.json") with any API - it lands in the temp file. Or call
+//   ("Data/SKSE/Plugins/MyMod/config.json") with any API and it lands in the temp file. Or call
 //   Create again, which replaces the whole content.
 //
 // ABI RULES: plain C only (no C++ types cross the DLL boundary), and TempFileAPI is APPEND-ONLY.
@@ -88,7 +88,7 @@ struct TempFileAPI {
 
     // Makes a temp copy of the file currently visible at `path` (loose file through the mod
     // manager VFS, or from a BSA once the game data is loaded). If a temp file already exists
-    // for this path - created by you or by ANY other mod - it is kept as is and
+    // for this path, created by you or by ANY other mod, it is kept as is and
     // kTempFile_AlreadyExists is returned, without copying again.
     std::int32_t (*Copy)(const char* path);
 
@@ -105,7 +105,7 @@ struct TempFileAPI {
 
     // Writes the absolute UTF-8 path of the real temp file into `out` (null-terminated) and
     // returns the buffer size needed, INCLUDING the terminator. Returns 0 if there is no temp
-    // file. If the return value is > outSize nothing was written - call again with a bigger
+    // file. If the return value is > outSize nothing was written, so call again with a bigger
     // buffer. You rarely need this: writing to the normal Data path already reaches the file.
     std::uint32_t (*GetRealPath)(const char* path, char* out, std::uint32_t outSize);
 };

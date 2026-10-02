@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Copyright (c) 2026 HDharder - Temp File Framework, https://github.com/HDharder/Skyrim-Temp-File-Framework
+// Copyright (c) 2026 HDharder, Temp File Framework, https://github.com/HDharder/Skyrim-Temp-File-Framework
 
 #pragma once
 
 // Pointers to the ORIGINAL Windows file API functions.
 //
 // Before Hooks::Install they point at the API itself; afterwards, at the MinHook trampoline.
-// All framework code that needs to see the disk "as it really is" - without OUR redirection, but
-// STILL going through the MO2 VFS (usvfs) - calls through here.
+// All framework code that needs to see the disk "as it really is" (without OUR redirection, but
+// STILL going through the MO2 VFS, usvfs) calls through here.
 //
 // WARNING: calling ::CreateFileW directly from inside the framework goes through our own hook.
 // It is not a bug (the reentrancy guard keeps it safe), but it is wasted work and confuses
@@ -20,7 +20,7 @@ struct TFF_CopyFile2Params {
     DWORD dwCopyFlags;
 };
 using CopyFile2Fn = HRESULT(WINAPI*)(PCWSTR, PCWSTR, TFF_CopyFile2Params*);
-// Same for CreateFile2 - it is what MSVC's std::filesystem uses to open files (remove, file_size,
+// Same for CreateFile2, which is what MSVC's std::filesystem uses to open files (remove, file_size,
 // equivalent, ...). The extended parameter is only passed through, never read.
 using CreateFile2Fn = HANDLE(WINAPI*)(LPCWSTR, DWORD, DWORD, DWORD, void*);
 

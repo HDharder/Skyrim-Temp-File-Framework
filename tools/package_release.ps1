@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-only
-# Copyright (c) 2026 HDharder - Temp File Framework
+# Copyright (c) 2026 HDharder, Temp File Framework
 # Builds the release archive from an existing Release build:
 #   dist\<version>\TempFileFramework-<version>.zip   (install-ready: drop into MO2/Vortex)
 #     SKSE\Plugins\TempFileFramework.dll
@@ -75,7 +75,7 @@ foreach ($file in Get-ChildItem $stage -Recurse -File) {
     foreach ($marker in $markers) {
         if ($ascii.IndexOf($marker, [StringComparison]::OrdinalIgnoreCase) -ge 0 -or
             $wide.IndexOf($marker, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
-            throw "'$($file.Name)' still contains a machine-specific string - not packaging"
+            throw "'$($file.Name)' still contains a machine-specific string, not packaging"
         }
     }
 }

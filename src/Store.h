@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Copyright (c) 2026 HDharder - Temp File Framework, https://github.com/HDharder/Skyrim-Temp-File-Framework
+// Copyright (c) 2026 HDharder, Temp File Framework, https://github.com/HDharder/Skyrim-Temp-File-Framework
 
 #pragma once
 
@@ -9,7 +9,7 @@
 //
 // Key = path relative to Data, normalized and lowercase ("skse\plugins\x\a.json").
 // Each entry keeps the REAL path of the temp file (outside the game folder) and an "anchor"
-// handle opened with FILE_FLAG_DELETE_ON_CLOSE: that is what guarantees cleanup even on CTD -
+// handle opened with FILE_FLAG_DELETE_ON_CLOSE. That is what guarantees cleanup even on CTD:
 // when the process dies, however it dies, the kernel closes the handle and deletes the file.
 namespace Store {
     // Results = the same codes as the public API.
@@ -56,7 +56,7 @@ namespace Store {
 
     // --- Session-only paths (see SessionPaths.h); called from the hooks ---
     // Makes sure a temp file exists for a path about to be written. `a_keepContent`: start from
-    // the current file (loose / MO2 VFS only - never the engine); otherwise start empty.
+    // the current file (loose / MO2 VFS only, never the engine); otherwise start empty.
     Result EnsureSessionFile(std::wstring_view a_rel, bool a_keepContent);
     // A folder that exists only for this session (visible like the folders of temp files).
     Result CreateSessionDirectory(std::wstring_view a_rel);

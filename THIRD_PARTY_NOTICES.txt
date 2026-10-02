@@ -1,4 +1,4 @@
-Temp File Framework - third-party notices
+Temp File Framework: third-party notices
 ==========================================
 
 TempFileFramework.dll statically links the following libraries. Their licenses require these notices to accompany it.
@@ -8,7 +8,7 @@ CommonLibSSE-NG
 ------------------------------------------------------------------------------
 CommonLibSSE-NG (https://github.com/alandtse/CommonLibSSE-NG) is licensed under the
 GNU General Public License v3.0 or later, with the Modding Exception and the GPL-3.0 Linking
-Exception (with Corresponding Source) - see its COPYING.txt and EXCEPTIONS.md. Temp File
+Exception (with Corresponding Source), see its COPYING.txt and EXCEPTIONS.md. Temp File
 Framework is itself GPL-3.0 and its source is public, which satisfies those terms. It was
 originally based on code under the following MIT license:
 

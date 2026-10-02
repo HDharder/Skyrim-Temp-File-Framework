@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Copyright (c) 2026 HDharder - Temp File Framework, https://github.com/HDharder/Skyrim-Temp-File-Framework
+// Copyright (c) 2026 HDharder, Temp File Framework, https://github.com/HDharder/Skyrim-Temp-File-Framework
 
-// TempFileTester - in-game test for the Temp File Framework. NOT part of the release.
+// TempFileTester: in-game test for the Temp File Framework. NOT part of the release.
 //
 // Runs once, on the first frame after kDataLoaded (so every plugin's kDataLoaded handler, including
 // the framework's, has already run), and writes a PASS/FAIL report to TempFileTester.log.
@@ -88,8 +88,8 @@ namespace {
         file << a_text;
     }
 
-    // Reads through the ENGINE's resource system (loose files first, then BSAs) - the same path
-    // the game uses to load a mesh.
+    // Reads through the ENGINE's resource system (loose files first, then BSAs), the same way
+    // the game loads a mesh.
     std::optional<std::vector<char>> ReadEngine(const std::string& a_path) {
         RE::BSResourceNiBinaryStream stream(a_path);
         if (!stream.good() || !stream.stream) {
@@ -163,7 +163,7 @@ namespace {
     }
 
     void RunTests() {
-        Log("Temp File Framework - in-game test");
+        Log("Temp File Framework in-game test");
         Log("==================================");
 
         const TempFileAPI* api = TempFile::GetAPI();
@@ -184,8 +184,8 @@ namespace {
         Check(before == kFixtureContent, "fixture visible through the mod manager", before);
         const bool fixtureCopied = api->Copy(kFixture) == kTempFile_Ok;
         Check(fixtureCopied, "Copy of a file that comes from a mod folder");
-        // Without a temp file, the writes below would hit the REAL mod file - the exact thing this
-        // framework must prevent. Stop here instead.
+        // Without a temp file, the writes below would hit the REAL mod file, which is exactly what
+        // this framework must prevent. Stop here instead.
         if (!fixtureCopied || !api->Exists(kFixture)) {
             Log("Section skipped: no temp file, writing now would modify the real mod file.");
             return;
@@ -245,9 +245,9 @@ namespace {
         if (!rollBytes) {
             return;
         }
-        // With engine index support a BSA-only path is a plain success; on runtimes where it is off (not
-        // verified) the framework says so with ArchiveLocked - both are correct, and they decide what the
-        // engine checks below must expect.
+        // With engine index support a BSA-only path is a plain success. Where it is off (VR, or engine
+        // code that does not match) the framework says so with ArchiveLocked. Both are correct, and
+        // they decide what the engine checks below must expect.
         const std::int32_t copied = api->Copy(roll.c_str());
         const bool engineIndex = copied == kTempFile_Ok;
         Check(copied == kTempFile_Ok || copied == kTempFile_ArchiveLocked, "Copy of a model that lives in a BSA",
@@ -342,14 +342,14 @@ namespace {
         Log("");
         Log("RESULT: {} passed, {} failed", g_passed, g_failed);
         Log("");
-        Log("VISUAL CHECK - load a save, open the console and type:");
+        Log("VISUAL CHECK: load a save, open the console and type:");
         Log("  player.additem 0001397E 1    (iron dagger    - early temp over BSA)");
         Log("  player.additem 00012EB7 1    (iron sword     - late temp over BSA)");
         Log("  player.additem 00013982 1    (iron mace      - brand-new path, created late)");
         Log("  player.additem 00013983 1    (steel war axe  - brand-new path, reserved early)");
         Log("Drop all four: all four must look like a SWEET ROLL.");
         Log("");
-        Log("CLEANUP CHECK - while the game runs, this folder has files:");
+        Log("CLEANUP CHECK: while the game runs, this folder has files:");
         Log("  {}", real.empty() ? "?" : real.substr(0, real.find("\\files\\")));
         Log("Quit from the menu: the folder must be gone. Kill SkyrimSE.exe in Task Manager instead: the");
         Log("files must be gone and the next launch must log 'Removed 1 leftover session folder(s)' in");

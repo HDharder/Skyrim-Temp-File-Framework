@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Copyright (c) 2026 HDharder - Temp File Framework, https://github.com/HDharder/Skyrim-Temp-File-Framework
+// Copyright (c) 2026 HDharder, Temp File Framework, https://github.com/HDharder/Skyrim-Temp-File-Framework
 
 #include "Hooks.h"
 
@@ -72,7 +72,7 @@ namespace Hooks {
 
         // ---------------------------------------------------------------------------------
         // Diagnostic trace (TempFile_DebugTrace): logs every hooked call whose path contains a
-        // filter, WHATEVER the outcome - used to find out which API a caller (the engine) really
+        // filter, WHATEVER the outcome. Used to find out which API a caller (the engine) really
         // uses. Off by default; costs one atomic load per call when off.
         // ---------------------------------------------------------------------------------
         std::atomic<bool> g_traceOn{false};
@@ -105,7 +105,7 @@ namespace Hooks {
             }
         }
 
-        // Native (ntdll) layer - TRACE ONLY, no redirection. Installed lazily the first time the
+        // Native (ntdll) layer: TRACE ONLY, no redirection. Installed lazily the first time the
         // trace is turned on, so a normal session never touches ntdll. Shows callers that skip
         // Win32 entirely (the layer usvfs hooks).
         using NtCreateFileFn = NTSTATUS(NTAPI*)(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES, PIO_STATUS_BLOCK,
@@ -247,7 +247,7 @@ namespace Hooks {
         }
 
         // Move/copy onto a session-only path. Returns true when the destination became a temp file
-        // (the transfer then replaces it); false leaves the call alone - including "the destination
+        // (the transfer then replaces it); false leaves the call alone. That includes "the destination
         // already exists and the caller did not ask to replace it", which must still fail.
         bool PrepareSessionTarget(LPCWSTR a_target, bool a_replace) {
             if (!SessionPaths::Active() || t_busy) {
@@ -339,8 +339,8 @@ namespace Hooks {
         }
 
         // WARNING: MSVC's std::filesystem opens files with CreateFile2, not CreateFileW. Without
-        // this hook, fs::remove("Data/.../x.json") with an active temp file deleted the ORIGINAL -
-        // caught by the test (tests/test.cpp), not by inspection.
+        // this hook, fs::remove("Data/.../x.json") with an active temp file deleted the ORIGINAL.
+        // The test caught it (tests/test.cpp), not code review.
         HANDLE WINAPI Hook_CreateFile2(LPCWSTR a_name, DWORD a_access, DWORD a_share, DWORD a_disposition,
                                        void* a_params) {
             Trace("CreateFile2", a_name);
@@ -733,8 +733,8 @@ namespace Hooks {
         // DeleteFile / MoveFile / ReplaceFile / CopyFile
         //
         // Without these, a mod that saves the safe way (writes x.tmp and renames it over x.json) or
-        // that deletes its own file would go right through the temp file and touch the ORIGINAL -
-        // exactly what the framework exists to prevent. Rule:
+        // that deletes its own file would go right through the temp file and touch the ORIGINAL,
+        // which is exactly what the framework exists to prevent. Rule:
         //   - deleting a path with a temp file = deleting the temp file (the original comes back);
         //   - moving/copying TO a path with a temp file = replacing the temp file's content;
         //   - moving/copying FROM a path with a temp file = using the temp file's content.
@@ -919,7 +919,7 @@ namespace Hooks {
 
         // MSVC's std::filesystem::remove (and several other libraries) does NOT call DeleteFileW: it
         // opens the file with DELETE access and marks it for deletion through the handle. Since the
-        // open was redirected, the handle points at the temp file - without this hook the physical
+        // open was redirected, the handle points at the temp file. Without this hook the physical
         // file vanished under the registry, which kept redirecting to a missing file. Same idea
         // for renaming through a handle.
         constexpr int kFileDispositionInfoEx = 21;  // not in the SDK with _WIN32_WINNT 0x0601
@@ -960,7 +960,7 @@ namespace Hooks {
 
         // Skyrim does not quit through ExitProcess: it kills itself with TerminateProcess, so DLLs
         // never get DLL_PROCESS_DETACH and the session folder was left behind (the files themselves
-        // were already gone - DELETE_ON_CLOSE). Found by the in-game test. Clean up right before
+        // were already gone thanks to DELETE_ON_CLOSE). Found by the in-game test. Clean up right before
         // the process terminates itself.
         BOOL WINAPI Hook_TerminateProcess(HANDLE a_process, UINT a_exitCode) {
             if (GetProcessId(a_process) == GetCurrentProcessId()) {
@@ -969,7 +969,7 @@ namespace Hooks {
             return Real::TerminateProcess(a_process, a_exitCode);
         }
 
-        // Folders created under session-only paths live only in the session too - otherwise MO2 keeps
+        // Folders created under session-only paths live only in the session too, otherwise MO2 keeps
         // them as empty folders in overwrite. A folder that already exists (in Data or a mod) is left
         // to the normal call, which reports it.
         BOOL CreateDirectoryCore(LPCWSTR a_name, bool& a_handled) {
@@ -1114,7 +1114,7 @@ namespace Hooks {
         // stored in Real:: stay valid (they just run the original prologue and jump back), so
         // there is nothing to undo.
         if (!essential) {
-            logger::critical("Essential hooks failed - temp files disabled for this session");
+            logger::critical("Essential hooks failed, temp files are disabled for this session");
             return false;
         }
 

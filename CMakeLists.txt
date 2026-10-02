@@ -38,8 +38,8 @@ target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}"
 target_link_libraries(${PROJECT_NAME} PRIVATE minhook::minhook shell32 ole32)
 
 # Source paths end up inside the binaries (__FILE__, std::source_location in logging, asserts).
-# Trim them to paths relative to the project, so a published DLL says nothing about the folder -
-# or the machine - it was built on.
+# Trim them to paths relative to the project, so a published DLL says nothing about the folder
+# or the machine it was built on.
 file(TO_NATIVE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/" TFF_SOURCE_PREFIX)
 target_compile_options(${PROJECT_NAME} PRIVATE "/d1trimfile:${TFF_SOURCE_PREFIX}")
 

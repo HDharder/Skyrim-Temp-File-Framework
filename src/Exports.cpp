@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Copyright (c) 2026 HDharder - Temp File Framework, https://github.com/HDharder/Skyrim-Temp-File-Framework
+// Copyright (c) 2026 HDharder, Temp File Framework, https://github.com/HDharder/Skyrim-Temp-File-Framework
 
 #include "Exports.h"
 
@@ -61,7 +61,7 @@ extern "C" __declspec(dllexport) const TempFileAPI* TempFile_GetAPI(std::uint32_
     return &g_api;
 }
 
-// Diagnostics only - not part of TempFileAPI. Logs every hooked file call whose path contains
+// Diagnostics only, not part of TempFileAPI. Logs every hooked file call whose path contains
 // `a_filter` to TempFileFramework.log; null or "" turns it off.
 extern "C" __declspec(dllexport) void TempFile_DebugTrace(const char* a_filter) {
     Hooks::SetTrace(a_filter ? Store::FromUtf8(a_filter) : std::wstring{});

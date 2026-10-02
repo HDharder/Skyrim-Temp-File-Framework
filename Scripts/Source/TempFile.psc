@@ -1,13 +1,13 @@
 ; SPDX-License-Identifier: MIT
-; Copyright (c) 2026 HDharder - Temp File Framework, https://github.com/HDharder/Skyrim-Temp-File-Framework
+; Copyright (c) 2026 HDharder, Temp File Framework, https://github.com/HDharder/Skyrim-Temp-File-Framework
 ; This script source is MIT licensed (like TempFileAPI.h) so any mod can compile against it.
 Scriptname TempFile Hidden
-{Temp File Framework - session-only overlay files for paths inside Data.
+{Temp File Framework: session-only overlay files for paths inside Data.
 Paths are relative to Data ("SKSE/Plugins/MyMod/config.json"). Every temp file is deleted when
 the game closes (even on CTD) and the original file is never modified.}
 
-; Makes a temp copy of the current file at asPath (loose or BSA - BSAs only after the game data
-; has loaded). If a temp file already exists it is reused as is. Returns the real path of the
+; Makes a temp copy of the current file at asPath, loose or from a BSA (BSAs only after the
+; game data has loaded). If a temp file already exists it is reused as is. Returns the real path of the
 ; temp file, or "" if the original was not found.
 string Function Copy(string asPath) global native
 

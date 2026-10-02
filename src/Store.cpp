@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Copyright (c) 2026 HDharder - Temp File Framework, https://github.com/HDharder/Skyrim-Temp-File-Framework
+// Copyright (c) 2026 HDharder, Temp File Framework, https://github.com/HDharder/Skyrim-Temp-File-Framework
 
 #include "Store.h"
 
@@ -11,12 +11,12 @@ namespace Store {
         struct Entry {
             std::wstring real;     // physical path of the temp file
             std::wstring display;  // relative to Data, in the casing of whoever created it
-            HANDLE anchor;         // opened with DELETE_ON_CLOSE - the file lives exactly as long as this handle
+            HANDLE anchor;         // opened with DELETE_ON_CLOSE, so the file lives exactly as long as this handle
         };
 
         // g_mapLock guards the map and is the ONLY lock the hooks ever take (always shared).
         // g_opLock serializes Copy/Create/Delete and is NEVER taken by a hook: Copy reads the
-        // original through the engine (BSA), which comes back through our hooks - if a hook
+        // original through the engine (BSA), which comes back through our hooks. If a hook
         // wanted g_opLock, that would deadlock.
         std::shared_mutex g_mapLock;
         std::unordered_map<std::wstring, Entry> g_entries;
@@ -171,8 +171,8 @@ namespace Store {
         }
 
         // WARNING: the anchor asks ONLY for DELETE access (the minimum for DELETE_ON_CLOSE and for the
-        // rename in Retire). If it held GENERIC_WRITE, every third-party open with FILE_SHARE_READ -
-        // what the game and the CRT normally use - would fail with a sharing violation, because
+        // rename in Retire). If it held GENERIC_WRITE, every third-party open with FILE_SHARE_READ
+        // (what the game and the CRT normally use) would fail with a sharing violation, because
         // Windows requires the newcomer's share mode to allow the access of every open handle.
         // The content is written through a separate, short-lived handle (WriteContent).
         HANDLE OpenAnchor(const std::wstring& a_real) {
@@ -197,7 +197,7 @@ namespace Store {
         }
 
         // Moves the temp file out of its path BEFORE closing the anchor. If the game still has the
-        // file open, the deletion only happens once it closes it - and until then the path would
+        // file open, the deletion only happens once it closes it, and until then the path would
         // stay "busy", making an immediate Create fail. Moved to trash\, the path is free at once.
         void Retire(Entry& a_entry) {
             const std::wstring target = Win32Path(g_trashDir + std::to_wstring(++g_trashCounter));
@@ -230,7 +230,7 @@ namespace Store {
         }
 
         // The game decides "loose or BSA" for every archived file ONCE, while loading the archives
-        // (a GetFileAttributesExA per entry - seen in the in-game trace), and never asks again. A
+        // (a GetFileAttributesExA per entry, seen in the in-game trace), and never asks again. A
         // path with no loose file that the engine finds anyway is being served from a BSA, and a
         // temp file created now will not change that for the engine. Must run BEFORE the entry is
         // registered, or our own redirection would answer "loose file exists".
@@ -246,7 +246,7 @@ namespace Store {
         }
 
         // `a_engine`: also make the game engine see it (resource index, BSA check). Off for session-only
-        // files, which are created from inside the file API hooks - the engine is not called from there.
+        // files, which are created from inside the file API hooks where the engine is never called.
         Result CreateLocked(const std::wstring& a_key, const std::wstring& a_display, const void* a_data,
                             std::size_t a_size, bool a_engine = true) {
             std::optional<std::wstring> existing;

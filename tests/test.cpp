@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Copyright (c) 2026 HDharder - Temp File Framework, https://github.com/HDharder/Skyrim-Temp-File-Framework
+// Copyright (c) 2026 HDharder, Temp File Framework, https://github.com/HDharder/Skyrim-Temp-File-Framework
 
 // Out-of-game test: builds the REAL Store.cpp + Hooks.cpp into an .exe, using the .exe's folder
 // as the "game folder" (Data\ next to it), and checks the redirection through the APIs mods
@@ -96,8 +96,8 @@ namespace {
         return code;
     }
 
-    // Child process: creates a temp file and "crashes" (TerminateProcess - none of our cleanup
-    // code runs, just like a real CTD).
+    // Child process: creates a temp file and "crashes" with TerminateProcess. None of our cleanup
+    // code runs, just like a real CTD.
     int ChildCrash() {
         if (!Store::Init() || !Hooks::Install()) {
             return 10;
@@ -113,8 +113,8 @@ namespace {
         return 12;
     }
 
-    // Child process: creates a temp file and quits the way Skyrim does - TerminateProcess on itself,
-    // through the HOOKED function this time.
+    // Child process: creates a temp file and quits the way Skyrim does, with TerminateProcess on
+    // itself, through the HOOKED function this time.
     int ChildExit() {
         if (!Store::Init() || !Hooks::Install()) {
             return 10;
@@ -342,7 +342,7 @@ int main(int argc, char** argv) {
         fs::rename(mod / "safe.tmp", sessionMod / "saved.json");
         CHECK(ReadStd(sessionMod / "saved.json") == "SAFE");
         CHECK(!isReal(sessionMod / "saved.json") && !isReal(mod / "safe.tmp"));
-        // Paths outside the patterns - and outside [SessionOnly] - still write to disk.
+        // Paths outside the patterns, and outside [SessionOnly], still write to disk.
         WriteStd(mod / "persistent.txt", "KEEP");
         CHECK(ReadRaw(mod / "persistent.txt") == "KEEP");
         fs::create_directories(data / "SKSE/Plugins/NotASessionPath");
@@ -357,7 +357,7 @@ int main(int argc, char** argv) {
     std::printf("\n== long paths: fits under Data, over MAX_PATH under the temp folder ==\n");
     {
         // A Data-relative path sized so that Data\<rel> stays under MAX_PATH (what the game can
-        // open) while the temp folder copy - whose prefix is longer - goes over it.
+        // open) while the temp folder copy, whose prefix is longer, goes over it.
         const std::wstring dataPrefix = (data / "").wstring();
         std::wstring rel = L"SKSE\\Plugins\\TFFTest\\long\\";
         while (dataPrefix.size() + rel.size() + 20 < MAX_PATH - 1) {
@@ -402,6 +402,6 @@ int main(int argc, char** argv) {
     Store::Shutdown();
     CHECK(!fs::exists(session));
 
-    std::printf("\n%s - %d failure(s)\n", g_failures == 0 ? "ALL PASSED" : "FAILED", g_failures);
+    std::printf("\n%s, %d failure(s)\n", g_failures == 0 ? "ALL PASSED" : "FAILED", g_failures);
     return g_failures == 0 ? 0 : 1;
 }
