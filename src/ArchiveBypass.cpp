@@ -218,6 +218,13 @@ namespace ArchiveBypass {
             logger::warn("Engine index: runtime not supported yet - BSA-only paths report ArchiveLocked");
             return false;
         }
+        // The IDs and instruction offsets below were verified on 1.6.x only. On 1.7.x the Address
+        // Library IDs may point elsewhere, and the byte checks alone are too weak to catch that.
+        if (REL::Module::get().version() >= REL::Version(1, 7, 0, 0)) {
+            logger::warn("Engine index: not verified on {} yet - BSA-only paths report ArchiveLocked",
+                         REL::Module::get().version().string("."));
+            return false;
+        }
         const std::uintptr_t base = REL::Module::get().base();
         const std::uintptr_t createStream = REL::ID(69839).address();
         const std::uintptr_t findRecord = REL::ID(69689).address();

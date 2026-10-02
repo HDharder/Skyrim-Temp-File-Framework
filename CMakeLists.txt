@@ -13,7 +13,13 @@ if(DEFINED ENV{SKYRIM_MODS_FOLDER} AND IS_DIRECTORY "$ENV{SKYRIM_MODS_FOLDER}")
     set(OUTPUT_FOLDER "$ENV{SKYRIM_MODS_FOLDER}/${PROJECT_NAME}")
 endif()
 
-find_package(CommonLibSSE CONFIG REQUIRED)
+# CommonLibSSE-NG (alandtse fork, GPL-3.0-or-later with Modding Exception) as a git submodule:
+# the colorglass vcpkg port stopped at 1.6.x, this fork also covers 1.7.x.
+set(BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(COMMONLIBSSE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/extern/CommonLibSSE-NG" CACHE PATH "Path to CommonLibSSE-NG")
+add_subdirectory("${COMMONLIBSSE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/commonlibsse-ng" EXCLUDE_FROM_ALL)
+include("${COMMONLIBSSE_DIR}/cmake/CommonLibSSE.cmake")
+
 find_package(minhook CONFIG REQUIRED)
 
 add_commonlibsse_plugin(${PROJECT_NAME} SOURCES

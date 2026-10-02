@@ -12,10 +12,10 @@ namespace Diagnostics {
         // whole database, ~0.5 s), and only ever in a diagnostic session.
         std::optional<std::uint64_t> IdOf(std::uintptr_t a_offset) {
             static std::once_flag once;
-            static std::unique_ptr<REL::IDDatabase::Offset2ID> table;
+            static std::unique_ptr<REL::Offset2ID> table;
             std::call_once(once, [] {
                 try {
-                    table = std::make_unique<REL::IDDatabase::Offset2ID>();
+                    table = std::make_unique<REL::Offset2ID>();
                 } catch (...) {
                     table.reset();
                 }

@@ -388,7 +388,7 @@ namespace {
             Log("");
             Log("RESULT (with Papyrus): {} passed, {} failed", g_passed, g_failed);
             const auto text = std::format("TempFileTester Papyrus: {} passed, {} failed", g_passed, g_failed);
-            RE::DebugNotification(text.c_str());
+            RE::SendHUDMessage::ShowHUDMessage(text.c_str());
             return;
         }
         const auto& step = g_papyrusSteps[a_index];
@@ -443,7 +443,7 @@ namespace {
 
     void Notify() {
         const auto text = std::format("TempFileTester: {} passed, {} failed", g_passed, g_failed);
-        RE::DebugNotification(text.c_str());
+        RE::SendHUDMessage::ShowHUDMessage(text.c_str());
         if (auto* console = RE::ConsoleLog::GetSingleton()) {
             console->Print(text.c_str());
         }

@@ -6,6 +6,12 @@ TempFileFramework.dll statically links the following libraries. Their licenses r
 ------------------------------------------------------------------------------
 CommonLibSSE-NG
 ------------------------------------------------------------------------------
+CommonLibSSE-NG (https://github.com/alandtse/CommonLibSSE-NG) is licensed under the
+GNU General Public License v3.0 or later, with the Modding Exception and the GPL-3.0 Linking
+Exception (with Corresponding Source) - see its COPYING.txt and EXCEPTIONS.md. Temp File
+Framework is itself GPL-3.0 and its source is public, which satisfies those terms. It was
+originally based on code under the following MIT license:
+
 MIT License
 
 Copyright (c) 2018 Ryan-rsm-McKenzie

@@ -182,8 +182,11 @@ game's model loader can be checked by eye (`player.additem 0001397E 1`, `00012EB
 
 ## Build
 
-CMake + vcpkg (`commonlibsse-ng`, `minhook`), `debug`/`release` presets, `x64-windows-static`
-triplet. With `SKYRIM_MODS_FOLDER` set, the build copies the output to
+CMake + vcpkg, `debug`/`release` presets, `x64-windows-static` triplet. CommonLibSSE-NG is the
+[alandtse fork](https://github.com/alandtse/CommonLibSSE-NG) (covers 1.5.97, 1.6.x and 1.7.x), a git
+submodule in `extern/CommonLibSSE-NG` pinned to a release tag - clone with `--recursive`, or run
+`git submodule update --init --recursive`. It is built from source with the plugin (its prebuilt
+bundle needs the dynamic CRT); vcpkg supplies its dependencies and MinHook. With `SKYRIM_MODS_FOLDER` set, the build copies the output to
 `<mods>\TempFileFramework\SKSE\Plugins\`.
 
 `tools\package_release.ps1 -Version x.y.z` turns a Release build into the install-ready
