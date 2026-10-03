@@ -23,11 +23,11 @@ Game closes / CTD / process killed -> Windows deletes the temp files.
 | `Delete(path)` | Deletes the temp file; the original applies again. |
 | `Exists(path)` | Is there a temp file for this path? |
 | `GetRealPath(path, out, size)` | Physical path of the temp file (rarely needed, since writing to the normal Data path already reaches it). |
-| `CreateEx(path, data, size, flags)` *(API 2)* | `Create` with flags: `kTempFile_NoReload` (do not reload a texture already loaded from this path) and `kTempFile_OnDisk` (for big files: let Windows write the data to disk instead of keeping it in memory). |
-| `ReloadTexture(path)` *(API 2)* | Reloads every live texture the engine loaded from this `.dds` path, from whatever the path resolves to now. `Create`, `Copy` and `Delete` of a `.dds` already do it by themselves. |
-| `ReloadingTexture()` *(API 2)* | For plugins hooking `ID3D11Device::CreateTexture2D` (texture downscalers): the `NiSourceTexture*` being re-created on this thread during a reload, else null. |
+| `CreateEx(path, data, size, flags)` <sup>v1.2.0</sup> | `Create` with flags: `kTempFile_NoReload` (do not reload a texture already loaded from this path) and `kTempFile_OnDisk` (for big files: let Windows write the data to disk instead of keeping it in memory). |
+| `ReloadTexture(path)` <sup>v1.2.0</sup> | Reloads every live texture the engine loaded from this `.dds` path, from whatever the path resolves to now. `Create`, `Copy` and `Delete` of a `.dds` already do it by themselves. |
+| `ReloadingTexture()` <sup>v1.2.0</sup> | For plugins hooking `ID3D11Device::CreateTexture2D` (texture downscalers): the `NiSourceTexture*` being re-created on this thread during a reload, else null. |
 
-**Textures follow their temp file.** Creating, rewriting or deleting the temp file of a `.dds` the
+**Textures follow their temp file.** <sup>v1.2.0</sup> Creating, rewriting or deleting the temp file of a `.dds` the
 engine has already loaded reloads it in place. The file is read again through the engine's
 resource system on a background thread, a new D3D texture is created through the device's normal
 `CreateTexture2D` (so other plugins hooking it still decide the size), and on the main thread,
@@ -71,13 +71,13 @@ need the Creation Kit: `tools\compile_papyrus.ps1` rebuilds the `.pex` after the
 string real = TempFile.Copy("SKSE/Plugins/MyMod/config.json")
 TempFile.Create("SKSE/Plugins/MyMod/state.txt", "content")
 TempFile.Delete("SKSE/Plugins/MyMod/state.txt")
-int queued = TempFile.ReloadTexture("textures/MyMod/sign.dds")  ; 1.2.0 and later
+int queued = TempFile.ReloadTexture("textures/MyMod/sign.dds")  ; v1.2.0
 ```
 
 `ReloadTexture` is for a texture whose file changed some other way (another mod writing to the
 Data path, for example); `Create`, `Copy` and `Delete` already reload it by themselves.
 
-## Session-only paths (for players and modlists)
+## Session-only paths (for players and modlists) <sup>v1.1.0</sup>
 
 Optional, **off by default**. Paths listed here never get written to disk: when any mod writes to
 a matching path, the file becomes a session-only temp file first, so nothing lands in `Data` or in
@@ -164,18 +164,25 @@ logs every file call whose path contains `filter`, at the Win32 and the ntdll la
 
 ## Known limitations
 
+- ~~**Engine cache**: once the game has loaded a `.nif`/`.dds`, changing the temp file does not
+  reload what is already in memory. Create/copy it **before** the resource is loaded.~~
+  <sup>textures fixed in v1.2.0</sup>
 - **Models stay cached**: once the game has loaded a `.nif`, changing its temp file does not
   reload what is already in memory. Create or copy it **before** the model is loaded. Textures
   (`.dds`) do reload in place (see [Operations](#operations)), except cube maps and texture arrays.
+  <sup>v1.2.0</sup>
 - **Texture reloads run one after another** on a background thread, a few per second. A request is
   not cancelled by a later one for the same path; the result is still right, because each reload
-  reads the file as it is at that moment, only the work is repeated.
+  reads the file as it is at that moment, only the work is repeated. <sup>v1.2.0</sup>
 - **Texture reloading checks itself**: the first textures the engine loads must hold the D3D texture
   it just created. If they do not, reloading turns itself off and textures keep their old content.
+  <sup>v1.2.0</sup>
+- ~~**Engine index support needs runtime 1.6.x** (tested on 1.6.1170). On other runtimes a temp
+  file over a BSA-only path returns `kTempFile_ArchiveLocked`.~~ <sup>fixed in v1.2.0</sup>
 - **Engine index support**: SE (1.5.97) and AE (1.6.x, 1.7.x), tested in game on 1.5.97, 1.6.640,
   1.6.1170, 1.7.99 and 1.7.104. Not on VR. Where it cannot run, a temp file over a BSA-only path
   returns `kTempFile_ArchiveLocked`: it exists for std/Win32 access, but the engine keeps the BSA
-  copy. Everything else works the same.
+  copy. Everything else works the same. <sup>v1.2.0</sup>
 - **Copy from a BSA** only works from `kDataLoaded` on (the archives must be loaded to read them).
 - A temp file created **before the archives load** (`kPostLoad`) over a BSA path is registered by
   the game itself as a loose file, so no BSA record is ever created for it: if it is deleted later,
