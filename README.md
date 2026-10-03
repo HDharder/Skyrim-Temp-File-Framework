@@ -71,7 +71,11 @@ need the Creation Kit: `tools\compile_papyrus.ps1` rebuilds the `.pex` after the
 string real = TempFile.Copy("SKSE/Plugins/MyMod/config.json")
 TempFile.Create("SKSE/Plugins/MyMod/state.txt", "content")
 TempFile.Delete("SKSE/Plugins/MyMod/state.txt")
+int queued = TempFile.ReloadTexture("textures/MyMod/sign.dds")  ; 1.2.0 and later
 ```
+
+`ReloadTexture` is for a texture whose file changed some other way (another mod writing to the
+Data path, for example); `Create`, `Copy` and `Delete` already reload it by themselves.
 
 ## Session-only paths (for players and modlists)
 
@@ -200,9 +204,10 @@ it runs on the first frame after `kDataLoaded` and checks the MO2 VFS, BSAs and 
 resource loader, writing `TempFileTester.log`. It also points four iron weapons at temp files that
 hold the sweet roll model (early and late, over BSA files and over brand-new paths), so the
 game's model loader can be checked by eye (`player.additem 0001397E 1`, `00012EB7`, `00013982`,
-`00013983`: all four must look like a sweet roll). Its last section loads a brand-new texture
+`00013983`: all four must look like a sweet roll). Its texture section loads a brand-new texture
 through the engine, rewrites it and checks that the live texture follows (and that
-`kTempFile_NoReload` leaves it alone).
+`kTempFile_NoReload` leaves it alone). The Papyrus section needs a loaded game: for unattended
+runs, an `autococ.txt` next to the tester makes it enter the `qasmoke` test cell from the main menu.
 
 ## Build
 

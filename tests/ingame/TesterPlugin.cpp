@@ -28,6 +28,7 @@ namespace {
     constexpr auto kLateNew = "meshes\\TempFileTester\\LateRoll.nif";
     constexpr auto kFixture = "SKSE/Plugins/TempFileTester/fixture.txt";
     constexpr auto kFixtureContent = "FIXTURE-ORIGINAL"sv;
+    constexpr auto kReloadTexture = "textures\\TempFileTester\\reload.dds";  // section 7, reloaded again by 5
 
     std::shared_ptr<spdlog::logger> g_log;
     int g_passed = 0;
@@ -393,6 +394,9 @@ namespace {
         if (a_value.IsString()) {
             return std::format("\"{}\"", a_value.GetString());
         }
+        if (a_value.IsInt()) {
+            return std::to_string(a_value.GetSInt());
+        }
         return "?";
     }
 
@@ -450,6 +454,8 @@ namespace {
              [dataPath](const RE::BSScript::Variable& r) {
                  return r.IsBool() && !r.GetBool() && !fs::exists(dataPath);
              }},
+            {"ReloadTexture", {kReloadTexture}, "TempFile.ReloadTexture finds the texture section 7 keeps loaded",
+             [](const RE::BSScript::Variable& r) { return r.IsInt() && r.GetSInt() >= 1; }},
         };
         RunPapyrusStep(0);
     }
@@ -459,7 +465,6 @@ namespace {
     //    Runs after the other sections, over a few seconds: every engine call is posted to the
     //    main thread, and this thread only waits in between.
     // -------------------------------------------------------------------------------------------
-    constexpr auto kReloadTexture = "textures\\TempFileTester\\reload.dds";
     std::vector<RE::NiPointer<RE::NiTexture>> g_heldTextures;  // keeps them loaded
 
     // An uncompressed 32-bit DDS of one solid color, one mip level.
@@ -574,6 +579,25 @@ namespace {
               "the kTempFile_OnDisk file reads back through Data");
     }
 
+    // The Papyrus VM only runs scripts once a game is loaded. With autococ.txt next to the tester
+    // (not shipped, only for unattended runs) the tester enters the QA test cell from the main menu,
+    // like typing "coc qasmoke" in the console there, so section 5 runs without anyone loading a save.
+    void AutoEnterGame() {
+        if (!fs::exists(GameDir() / "Data/SKSE/Plugins/TempFileTester/autococ.txt")) {
+            return;
+        }
+        Log("autococ.txt found: entering qasmoke so the Papyrus section can run");
+        OnMainThread([] {
+            auto* factory = RE::IFormFactory::GetConcreteFormFactoryByType<RE::Script>();
+            if (auto* script = factory ? factory->Create() : nullptr) {
+                script->SetCommand("coc qasmoke");
+                script->CompileAndRun(nullptr);
+                delete script;
+            }
+            return 0;
+        });
+    }
+
     void Notify() {
         const auto text = std::format("TempFileTester: {} passed, {} failed", g_passed, g_failed);
         RE::SendHUDMessage::ShowHUDMessage(text.c_str());
@@ -604,6 +628,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse) {
                                 RunTextureTests(api);
                                 Log("");
                                 Log("RESULT (with textures): {} passed, {} failed", g_passed, g_failed);
+                                AutoEnterGame();
                             }).detach();
                         }
                         // Queued in the Papyrus VM: the calls run as soon as it processes them.

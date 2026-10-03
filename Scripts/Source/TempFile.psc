@@ -22,3 +22,10 @@ bool Function Exists(string asPath) global native
 
 ; Absolute path of the temp file on disk, or "" if there is none.
 string Function GetRealPath(string asPath) global native
+
+; Reloads every texture the game has already loaded from this .dds path, from whatever the path
+; holds now. Create, Copy and Delete of a .dds already do this by themselves; call it when the file
+; changed some other way (another mod writing to the Data path, for example). The swap happens a
+; few frames later. Returns how many loaded textures were queued (0: not loaded right now).
+; Needs framework 1.2.0 or later.
+int Function ReloadTexture(string asPath) global native

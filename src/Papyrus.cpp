@@ -4,6 +4,7 @@
 #include "Papyrus.h"
 
 #include "Store.h"
+#include "TextureReload.h"
 
 // Same operations as the C API, for scripts (Scripts/Source/TempFile.psc). Text content only:
 // a Papyrus string cannot carry binary data.
@@ -35,12 +36,17 @@ namespace {
         return RealPathOf(PathOf(a_path));
     }
 
+    std::int32_t ReloadTexture(RE::StaticFunctionTag*, RE::BSFixedString a_path) {
+        return TextureReload::Request(PathOf(a_path));
+    }
+
     bool RegisterFunctions(RE::BSScript::IVirtualMachine* a_vm) {
         a_vm->RegisterFunction("Copy"sv, kScript, Copy);
         a_vm->RegisterFunction("Create"sv, kScript, Create);
         a_vm->RegisterFunction("Delete"sv, kScript, Delete);
         a_vm->RegisterFunction("Exists"sv, kScript, Exists);
         a_vm->RegisterFunction("GetRealPath"sv, kScript, GetRealPath);
+        a_vm->RegisterFunction("ReloadTexture"sv, kScript, ReloadTexture);
         return true;
     }
 }
